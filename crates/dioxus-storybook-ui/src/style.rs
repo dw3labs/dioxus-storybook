@@ -53,11 +53,25 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-globals-reset:hover:not(:disabled){background:#E7E6E1;color:#C4451B}
 .dxsb-globals-reset:disabled{opacity:.3;cursor:default}
 
+/* --- viewport picker --------------------------------------------------- */
+.dxsb-viewport{display:flex;align-items:center;gap:8px;padding-right:12px;margin-right:4px;border-right:1px solid #E2E1DB}
+.dxsb-viewport-rotate{background:none;border:0;color:#787F88;font-size:13px;line-height:1;padding:3px 5px;border-radius:4px;cursor:pointer}
+.dxsb-viewport-rotate:hover:not(:disabled){background:#E7E6E1;color:#C4451B}
+.dxsb-viewport-rotate:disabled{opacity:.3;cursor:default}
+.dxsb-viewport-size{font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88}
+
 .dxsb-tagrow{display:flex;gap:5px}
 .dxsb-tag{font:10px ui-monospace,monospace;color:#4A5058;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:3px;padding:0 5px}
 
 .dxsb-canvas{flex:1;display:grid;place-items:center;padding:40px;background:#fff;overflow:auto;min-height:0}
+/* The pane the frame sits in. Responsive is the plain case: the frame is the
+   pane. A chosen viewport makes the pane a scrollable backdrop with a
+   fixed-size frame centred at the top of it — top, not middle, because a
+   1112px-tall tablet in a 600px pane must start at its own beginning. */
+.dxsb-stage{flex:1;min-height:0;display:flex;background:#fff}
+.dxsb-stage.sized{overflow:auto;justify-content:center;align-items:flex-start;padding:18px;background:#F2F2EF}
 .dxsb-frame{flex:1;min-height:0;width:100%;border:0;background:#fff;display:block}
+.dxsb-stage.sized .dxsb-frame{flex:0 0 auto;width:auto;border:1px solid #E2E1DB;border-radius:4px;box-shadow:0 1px 5px rgba(23,25,28,.12)}
 .dxsb-died{background:#FDF2F2;border-bottom:1px solid #E8C4C4;color:#9B1B1B;padding:10px 18px;flex-shrink:0}
 .dxsb-died-head{display:flex;align-items:center;gap:12px;font-size:13px}
 .dxsb-died-body{margin:6px 0 0;font:11.5px/1.5 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;color:#7A1616;max-height:9em;overflow:auto}

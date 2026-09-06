@@ -19,6 +19,11 @@
 //! uses and carried in an [`ArgMap`], which is what gives them a widget, a URL
 //! encoding and a wire encoding for free. See [`globals`].
 //!
+//! The [`viewport`] addon is the worked example of staying inside those three:
+//! its list of sizes is a declaration on the [`Project`], the size a story opens
+//! at is a *parameter*, and the size you picked is a *global*. Nothing about it
+//! needed a new kind of value.
+//!
 //! You normally depend on `dioxus-storybook` and use its prelude instead of
 //! reaching in here.
 //!
@@ -46,6 +51,7 @@ pub mod globals;
 pub mod registry;
 pub mod story;
 pub mod url;
+pub mod viewport;
 pub mod wire;
 
 pub use actions::{ActionSink, ArgsHandle, use_args};
@@ -61,4 +67,5 @@ pub use story::{
     StoryDef, kebab,
 };
 pub use url::UrlState;
+pub use viewport::{Viewport, ViewportSelection};
 pub use wire::ViewMode;

@@ -26,6 +26,7 @@
 
 use dioxus_core::Element;
 
+use crate::viewport::{self, Viewport, ViewportSelection};
 use crate::{ArgMap, ArgType, GlobalType};
 
 /// A `const`-constructible parameter value.
@@ -201,8 +202,8 @@ pub type Decorator = fn(&StoryContext, Element) -> Element;
 
 /// What a decorator is told about the story it is wrapping.
 ///
-/// `#[non_exhaustive]` and built only by this crate: it will grow globals and a
-/// viewport later in M3, and growing it must not break a decorator.
+/// `#[non_exhaustive]` and built only by this crate, so that growing it — as M3
+/// did twice, with globals and then the viewport — never breaks a decorator.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct StoryContext {
@@ -212,6 +213,7 @@ pub struct StoryContext {
     args: ArgMap,
     parameters: ResolvedParameters,
     globals: ArgMap,
+    viewport: Option<ViewportSelection>,
 }
 
 impl StoryContext {
@@ -254,6 +256,17 @@ impl StoryContext {
     pub const fn globals(&self) -> &ArgMap {
         &self.globals
     }
+
+    /// The canvas size in force, or `None` when the canvas is responsive.
+    ///
+    /// The frame is already this size — the shell sized it — so a decorator
+    /// does not need this to *lay out*; media queries in the story's own CSS
+    /// have already fired. It is here for the cases where the size has to be
+    /// said out loud: a device chrome around the story, a caption, a component
+    /// that branches on a breakpoint it was handed rather than one it measured.
+    pub const fn viewport(&self) -> Option<ViewportSelection> {
+        self.viewport
+    }
 }
 
 /// Configuration that applies to every story in the book.
@@ -268,20 +281,34 @@ impl StoryContext {
 /// static DECORATORS: &[Decorator] = &[|_ctx: &StoryContext, story: Element| story];
 /// static PROJECT: Project = Project::new().with_decorators(DECORATORS);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Project {
     decorators: &'static [Decorator],
     parameters: Parameters,
     globals: &'static [GlobalType],
+    viewports: &'static [Viewport],
+}
+
+/// The same thing [`Project::new`] builds, so a storybook mounted without a
+/// project and one mounted with `Project::new()` are the same storybook.
+///
+/// Written out rather than derived because they would otherwise differ: a
+/// derived `Default` gives an empty viewport list, and `new` gives the built-in
+/// one.
+impl Default for Project {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Project {
-    /// No decorators, no parameters.
+    /// No decorators, no parameters, no globals — and the built-in viewports.
     pub const fn new() -> Self {
         Self {
             decorators: &[],
             parameters: Parameters::new(),
             globals: &[],
+            viewports: viewport::DEFAULT_VIEWPORTS,
         }
     }
 
@@ -311,9 +338,33 @@ impl Project {
         self.decorators
     }
 
+    /// The canvas sizes the viewport picker offers.
+    ///
+    /// Defaults to [`DEFAULT_VIEWPORTS`](crate::viewport::DEFAULT_VIEWPORTS).
+    /// An empty slice removes the picker altogether and pins every story to a
+    /// responsive canvas — which is the right answer for a book of components
+    /// that are never laid out at a page level.
+    ///
+    /// ```
+    /// # use dioxus_storybook_core::{Project, Viewport};
+    /// static SIZES: &[Viewport] = &[Viewport::new("phone", "Phone", 390, 844)];
+    /// static PROJECT: Project = Project::new().with_viewports(SIZES);
+    /// static NO_PICKER: Project = Project::new().with_viewports(&[]);
+    /// ```
+    #[must_use]
+    pub const fn with_viewports(mut self, viewports: &'static [Viewport]) -> Self {
+        self.viewports = viewports;
+        self
+    }
+
     /// The declared globals.
     pub const fn globals(&self) -> &'static [GlobalType] {
         self.globals
+    }
+
+    /// The canvas sizes on offer. See [`with_viewports`](Self::with_viewports).
+    pub const fn viewports(&self) -> &'static [Viewport] {
+        self.viewports
     }
 
     /// Fill in every declared global that `selected` does not set.
@@ -570,13 +621,18 @@ impl StoryDef {
     /// here, so a caller may pass an empty map and a decorator still sees every
     /// global the project declares.
     pub fn context(&self, project: Project, args: &ArgMap, globals: &ArgMap) -> StoryContext {
+        let parameters = self.resolved_parameters(project);
         StoryContext {
             id: self.id(),
             title: self.title,
             name: self.name,
             args: args.clone(),
-            parameters: self.resolved_parameters(project),
+            parameters,
             globals: project.resolved_globals(globals),
+            // The *selections*, not the resolved set: an unset viewport global
+            // means "whatever this story asked for", which is a different
+            // answer from a viewport global set to `responsive`.
+            viewport: viewport::resolve(project.viewports(), globals, parameters),
         }
     }
 

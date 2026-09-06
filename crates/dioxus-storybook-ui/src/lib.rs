@@ -42,12 +42,13 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use dioxus_storybook_core::viewport::{self, RESPONSIVE, ROTATED_GLOBAL, VIEWPORT_GLOBAL};
 use dioxus_storybook_core::{
     ActionSink, ArgMap, ArgValue, ArgsHandle, Channel, ChannelHandle, Event, Project, Registry,
-    Row, RowKind, StoryDef, UrlState, ViewMode, flatten,
+    Row, RowKind, StoryDef, UrlState, ViewMode, ViewportSelection, flatten,
 };
 
-use toolbar::GlobalsBar;
+use toolbar::{GlobalsBar, ViewportPicker};
 
 use panels::{ACTION_LOG_CAP, ActionEntry, AddonPanel, PanelTab};
 
@@ -353,6 +354,19 @@ pub fn StorybookManager(
 
     let current = selected().and_then(|id| registry.get(&id));
     let row_list = rows();
+
+    // The canvas size, decided by the same function the preview uses to fill in
+    // `StoryContext::viewport` — so the frame the shell draws and the size the
+    // story is told about cannot disagree.
+    //
+    // The story's parameters are part of the input, which is why this is
+    // recomputed per render rather than kept in a signal: walking the sidebar
+    // onto a story that asks for a phone must change the frame.
+    let story_parameters = current
+        .map(|def| def.resolved_parameters(project))
+        .unwrap_or_default();
+    let viewports = project.viewports();
+    let viewport_selection = viewport::resolve(viewports, &globals(), story_parameters);
     // Clearing the overrides already tells the preview everything it needs, but
     // `ResetArgs` is emitted anyway: from M3 the preview holds state the manager
     // cannot see, and "go back to defaults" has to be a message, not an absence.
@@ -453,6 +467,49 @@ pub fn StorybookManager(
             main { class: "dxsb-main",
                 Toolbar {
                     story: current,
+                    viewport: rsx! {
+                        ViewportPicker {
+                            available: viewports,
+                            selection: viewport_selection,
+                            on_pick: move |name: String| {
+                                // Into the globals signal like any other
+                                // selection: the effect above is what puts it
+                                // on the wire and in the link.
+                                let mut selections = globals.write();
+                                if name == RESPONSIVE
+                                    && !viewport::responsive_needs_saying(
+                                        viewports,
+                                        &selections,
+                                        story_parameters,
+                                    )
+                                {
+                                    // Nothing to override, so say nothing:
+                                    // an absent key keeps the link short and
+                                    // keeps "the map is empty" meaning
+                                    // "nothing has been changed".
+                                    selections.remove(VIEWPORT_GLOBAL);
+                                    selections.remove(ROTATED_GLOBAL);
+                                } else {
+                                    selections.set(VIEWPORT_GLOBAL, ArgValue::Variant(name));
+                                }
+                            },
+                            on_rotate: move |()| {
+                                let mut selections = globals.write();
+                                let rotated = selections
+                                    .get(ROTATED_GLOBAL)
+                                    .and_then(ArgValue::as_bool)
+                                    .unwrap_or(false);
+                                // Removed rather than set to false, so an
+                                // unrotated canvas leaves nothing behind in
+                                // the URL to explain.
+                                if rotated {
+                                    selections.remove(ROTATED_GLOBAL);
+                                } else {
+                                    selections.set(ROTATED_GLOBAL, ArgValue::Bool(true));
+                                }
+                            },
+                        }
+                    },
                     globals: rsx! {
                         GlobalsBar {
                             declared: project.globals(),
@@ -497,7 +554,7 @@ pub fn StorybookManager(
                         },
                     }
                 }
-                PreviewFrame { src: frame_src() }
+                PreviewStage { src: frame_src(), viewport: viewport_selection }
                 AddonPanel {
                     arg_types: current.map(StoryDef::arg_types).unwrap_or(&[]),
                     initial: initial_args(),
@@ -587,20 +644,39 @@ fn SidebarRow(
     }
 }
 
+/// Keep the toolbar's own keystrokes out of the sidebar's keyboard navigation.
+///
+/// The shell listens for arrows, Enter and `/` on the whole `.dxsb` element,
+/// which is what makes the sidebar browsable without the mouse. A `<select>` in
+/// the toolbar wants exactly the same keys, and without this the two fight:
+/// focus the viewport picker, press ↓, and the *story* changes underneath you
+/// while the dropdown stays where it was.
+///
+/// Stopping propagation here rather than inspecting the event's target in the
+/// outer handler keeps the rule where the exception is, and needs nothing from
+/// the platform — there is no DOM to ask about a target off `wasm32`.
+///
+/// Found by opening the browser, not by the suite: a headless `VirtualDom` has
+/// no way to deliver a keystroke at all.
+fn swallow_toolbar_keys(event: KeyboardEvent) {
+    event.stop_propagation();
+}
+
 #[component]
-fn Toolbar(story: Option<&'static StoryDef>, globals: Element) -> Element {
+fn Toolbar(story: Option<&'static StoryDef>, viewport: Element, globals: Element) -> Element {
     let Some(story) = story else {
         return rsx! {
-            header { class: "dxsb-toolbar",
+            header { class: "dxsb-toolbar", onkeydown: swallow_toolbar_keys,
                 span { class: "dxsb-crumb", "No story selected" }
                 span { class: "dxsb-spacer" }
+                {viewport}
                 {globals}
             }
         };
     };
     let id = story.id();
     rsx! {
-        header { class: "dxsb-toolbar",
+        header { class: "dxsb-toolbar", onkeydown: swallow_toolbar_keys,
             span { class: "dxsb-crumb",
                 for (i, segment) in story.title().split('/').enumerate() {
                     if i > 0 {
@@ -612,6 +688,7 @@ fn Toolbar(story: Option<&'static StoryDef>, globals: Element) -> Element {
                 span { "{story.name()}" }
             }
             span { class: "dxsb-spacer" }
+            {viewport}
             {globals}
             span { class: "dxsb-tagrow",
                 for tag in story.tags().iter() {
@@ -663,13 +740,46 @@ fn PreviewDied(message: String, on_reload: EventHandler<()>) -> Element {
 /// independently — isolation from *accident*, not from malice. The stories are
 /// the developer's own code, compiled into the same binary as the shell.
 #[component]
-fn PreviewFrame(src: String) -> Element {
+fn PreviewFrame(src: String, style: String) -> Element {
     rsx! {
         iframe {
             id: PREVIEW_FRAME_ID,
             class: "dxsb-frame",
             src: "{src}",
+            style: "{style}",
             title: "Story preview",
+        }
+    }
+}
+
+/// The pane the frame sits in, and the viewport addon's entire preview-side
+/// implementation.
+///
+/// A viewport is a width, the width belongs to the frame, and the frame belongs
+/// to the shell — so "render this story on a phone" is a style attribute here
+/// and nothing at all over there. The story is not told to re-render, is not
+/// handed a breakpoint, and does not know it is being resized: its own media
+/// queries fire because it genuinely is that size. That is the payoff of the
+/// M3 split, and it is why this addon cost a stylesheet rule and a `<select>`.
+///
+/// Note what does *not* change: `src`. Changing an iframe's `src` reloads the
+/// document inside it, which would throw away the preview's state and its
+/// channel subscription on every resize. Only the style moves.
+#[component]
+fn PreviewStage(src: String, viewport: Option<ViewportSelection>) -> Element {
+    let (class, style) = match viewport {
+        Some(view) => (
+            "dxsb-stage sized",
+            format!("width:{}px;height:{}px", view.width(), view.height()),
+        ),
+        // No inline size at all, rather than `100%`: the stylesheet already
+        // makes a responsive frame fill the pane, and an empty attribute is one
+        // fewer thing overriding it.
+        None => ("dxsb-stage", String::new()),
+    };
+    rsx! {
+        div { class: "{class}",
+            PreviewFrame { src, style }
         }
     }
 }

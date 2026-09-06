@@ -12,6 +12,7 @@ use dioxus_storybook::prelude::*;
 mod badge;
 mod button;
 mod field;
+mod nav;
 
 /// The generated registry. `build.rs` both discovers the story files and
 /// declares them as modules, so this is the only wiring the app needs.

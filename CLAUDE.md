@@ -5,9 +5,9 @@ workbench where each component's states are declared as *stories*, rendered in
 isolation, driven by controls auto-generated from the props type, and later
 doubling as tests and documentation.
 
-**Status:** M0 (spikes), M1 (walking skeleton) and M2 (controls & actions)
-complete. M3 in progress — the iframe split, decorators, parameters, panic
-reporting and globals/toolbar are done; only the environment addons are left.
+**Status:** M0 (spikes), M1 (walking skeleton), M2 (controls & actions) and M3
+(isolation, globals, environment) complete — the iframe split, decorators,
+parameters, panic reporting, globals/toolbar and the viewport addon. M4 next.
 **Scope:** a publishable open-source crate — semver + docs discipline apply.
 **Name:** `dioxus-storybook` · MIT · © DW3Labs.
 **Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
@@ -56,6 +56,7 @@ log/
   0004-m2-controls-and-actions.md
   0005-m3-isolation.md
   0006-m3-globals-and-toolbar.md
+  0007-m3-viewport.md
 docs/
   PLAN.md                  the working plan: features, problems, milestones
   M0-FINDINGS.md           full spike write-up
@@ -67,7 +68,7 @@ crates/                    the published crates — all v0.1.0
   dioxus-storybook-build/  build-script story indexer
   dioxus-storybook-ui/     manager shell + preview harness
 examples/
-  button-gallery/          4 components, 15 stories — the thing you actually run
+  button-gallery/          5 components, 17 stories — the thing you actually run
 spikes/                    evidence, kept but superseded by crates/
   s1-hotreload/            vertical slice app (EXCLUDED from the workspace)
   s2-registry/             story-registration mechanism comparison
@@ -82,7 +83,7 @@ Cargo.toml                 workspace (edition 2024)
 # Run the storybook. This is the main loop.
 cd examples/button-gallery && dx serve --platform web
 
-# The whole suite: 150 tests + 13 doctests. Everything must stay green.
+# The whole suite: 152 tests + 19 doctests. Everything must stay green.
 cargo test --workspace
 
 # Definition of done for anything macro-facing. Must be clean.
@@ -116,6 +117,7 @@ cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
 | Parameters | **`ResolvedParameters`** consults three levels in order | no allocation, stays `Copy`, innermost wins |
 | Globals | **args machinery reused** — a `Control` declaration, an `ArgMap` of values | widget, URL encoding and wire encoding all came free; there must not be a fourth value vocabulary |
 | Globals on the wire | **only the selections**, never the resolved set | both halves share the `&'static` declarations, and an empty map then means "nothing changed" |
+| Viewport | **a style on the iframe** — list on the `Project`, choice a parameter, selection a global | the shell owns the frame's width, so nothing crosses the wire; and `ParamValue` cannot hold a record, so the list is a declaration |
 | Platform | **web-first** | the static build is both the shareable artifact and the screenshot-test substrate |
 | Story bodies | **fn pointers invoked in-scope** | `rsx!`/`EventHandler::new` need an active Dioxus scope |
 | Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |
@@ -155,6 +157,14 @@ cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
   Capturing a `mut` copy makes the closure `FnMut`.
 - **Do not construct `StoryDef`/`Meta` with struct literals.** Fields are private
   so that adding one stays non-breaking; use the `const` builders.
+- **A `<select>` in the toolbar fights the sidebar's keyboard navigation.** The
+  shell listens for arrows/Enter/`/` on the whole `.dxsb` element. Toolbar
+  controls stop propagation (`swallow_toolbar_keys`); the search input still
+  does not. No test can catch this — a headless `VirtualDom` cannot deliver a
+  keystroke.
+- **A derived `Default` on a config struct is a trap** once its `const fn new()`
+  stops being all-zeroes. `Project::new()` fills in `DEFAULT_VIEWPORTS`, so
+  `Default` is written out by hand to match it.
 - **`key` only works inside a list.** Dioxus consults it in `diff_keyed_children`
   only; a lone keyed child is diffed in place and never remounts. The preview
   wraps `StoryHost` in `for def in [def]` for exactly this reason — do not

@@ -126,6 +126,37 @@
 //! Globals live in the URL too (`&globals=theme:dark`), so a link carries the
 //! toolbar with it.
 //!
+//! # Viewports
+//!
+//! The toolbar also picks the *size* of the canvas, and this is the one addon
+//! that costs nothing: the story is in an iframe, the shell owns the frame's
+//! width, so choosing "Mobile" makes the story genuinely 360px wide. Its own
+//! media queries fire. Nothing is measured and nothing is injected.
+//!
+//! Every storybook ships with [`DEFAULT_VIEWPORTS`](viewport::DEFAULT_VIEWPORTS).
+//! Replace them, or take the picker away entirely, on the project:
+//!
+//! ```ignore
+//! static SIZES: &[Viewport] = &[
+//!     Viewport::new("phone", "Phone", 390, 844),
+//!     Viewport::new("desk", "Desk", 1440, 900),
+//! ];
+//! static PROJECT: Project = Project::new().with_viewports(SIZES);
+//! ```
+//!
+//! A story that only makes sense below a breakpoint can open there:
+//!
+//! ```ignore
+//! #[story(parameters { viewport: "phone" })]
+//! fn collapsed() -> NavbarProps { base() }
+//! ```
+//!
+//! Which is the split Storybook uses, mapped onto the two mechanisms already
+//! here: the *list* is a declaration, the *choice* is a parameter, and the
+//! *selection* is a global — so it rides in the link (`&globals=viewport:phone`)
+//! next to the theme, and a decorator can read it with
+//! [`StoryContext::viewport`](prelude::StoryContext::viewport).
+//!
 //! # `parameters.layout`
 //!
 //! One parameter is read by the canvas itself: `layout` is `"centered"` (the

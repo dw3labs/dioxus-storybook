@@ -9,9 +9,9 @@ PROJECT   A native Storybook for Dioxus: a component workbench where each
 STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
           M1 (walking skeleton) COMPLETE — browse + render + URL state.
           M2 (controls & actions) COMPLETE — the workbench is editable.
-          M3 (isolation, globals, environment) IN PROGRESS — 5 of 6 items done:
-            the iframe split, decorators + parameters, panic reporting,
-            globals + toolbar. Only the environment addons are left.
+          M3 (isolation, globals, environment) COMPLETE — iframe split,
+            decorators + parameters, panic reporting, globals + toolbar,
+            viewport addon.
 SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
 NAME      dioxus-storybook · MIT · (c) DW3Labs
 TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
@@ -21,45 +21,42 @@ TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
  HOT — what happens next
 --------------------------------------------------------------------------------
 
-NOTHING IS BLOCKED. M3 is one item from done. Session 0005 put the preview in an
-iframe over postMessage; session 0006 added globals, the toolbar, and the first
-parameter anything actually reads.
+NOTHING IS BLOCKED. M3 IS DONE. Session 0007 added the viewport addon, which
+turned out to be a `<select>` and a style attribute — the frame's width belongs
+to the shell, so nothing about it crosses the wire. M4 is the next milestone.
 
-DONE IN M3
+DONE IN M3 (all six)
   [x] Manager/preview split + postMessage Channel. No addon changed.
   [x] Decorators at 3 levels (project -> component -> story, outermost first).
   [x] Parameters with merge semantics (ResolvedParameters, innermost wins).
   [x] Panic reporting: the preview's panic hook posts Event::PreviewPanicked,
       the shell shows it with a "Reload the preview" button.
-  [x] Globals + toolbar. Declared on the Project, carried in the URL as
-      `&globals=theme:dark`, on the wire as Event::SetGlobals, and read by
-      decorators through StoryContext::globals().
-  [x] parameters.layout — centered / padded / fullscreen. The first consumer of
-      ResolvedParameters, and the worked example for the addons below.
+  [x] Globals + toolbar, carried in the URL as `&globals=theme:dark`.
+  [x] parameters.layout — centered / padded / fullscreen.
+  [x] Viewport addon: a picker + rotate in the toolbar, a sized iframe, and
+      `parameters { viewport: "mobile" }` for a story that should open small.
+      LIST = a Project declaration, CHOICE = a parameter, SELECTION = a global.
 
-NEXT UP (the last M3 item)
-  [ ] viewport / backgrounds / measure / outline addons.
-      - viewport is nearly free and is the one to do first: the preview is a
-        frame whose WIDTH THE SHELL OWNS, so it is a class on .dxsb-frame plus a
-        picker that looks exactly like the globals toolbar. In Storybook the
-        SELECTED viewport is globals state and the AVAILABLE LIST is a
-        parameter — which now maps cleanly onto both mechanisms this project
-        has, so copy that split rather than inventing one.
-      - backgrounds overlaps with what the example's theme decorator already
-        does by hand. DECIDE FIRST whether it is a built-in addon or just the
-        documented decorator pattern; do not write both.
-      - measure / outline are preview-side overlays driven by a global toggle.
+NEXT UP — pick one, and read LOG-0007's "notes for the next session" first
+  [ ] START M4 (docs / autodocs) if the milestone order stands. Check
+      docs/PLAN.md — it is what M4 means, and it has not been reread since 0002.
+  [ ] backgrounds addon. DECIDE FIRST whether it is a built-in or just the
+      documented decorator pattern; the example's theme decorator already does
+      the job by hand and the two would overlap. Do not write both.
+  [ ] measure / outline. Preview-side overlays driven by a global toggle — the
+      first addon that must put something INSIDE the frame, unlike viewport.
   [ ] ErrorBoundary for Element-level errors. DISTINCT from the panic hook,
-      which shipped in 0005. `ErrorBoundary` catches a story returning `Err`; it
-      cannot catch a panic, because wasm here is panic="abort".
+      which shipped in 0005. It catches a story returning `Err`; it cannot catch
+      a panic, because wasm here is panic="abort".
   [ ] MEASURE FIRST (carried from LOG-0004): Callback::new runs once per action
       prop PER RENDER inside wire_actions. Entries free only when StoryHost
       remounts. Bounded, but drag a slider and find out.
 
 READY TO RUN:
-  cargo test --workspace                      150 tests + 13 doctests, all green
+  cargo test --workspace                      152 tests + 19 doctests, all green
   rust-analyzer diagnostics .                 MUST stay clean — see standing facts
-  cd examples/button-gallery && dx serve --platform web    15 stories, 2 globals
+  cd examples/button-gallery && dx serve --platform web    17 stories, 2 globals,
+                                              5 viewports, 1 responsive component
   cargo package -p dioxus-storybook-core      verifies the publish metadata
   cd spikes/s4-iframe && dx serve --platform web           the M3 iframe spike
 
@@ -76,14 +73,19 @@ SMALL FOLLOW-UPS (unblocked, do any time):
   [ ] The preview document has no `<title>` of its own. Harmless, but a framed
       document showing up in a11y trees as untitled is worth 5 minutes at M6.
   [ ] docs/plan-artifact.html is the PUBLISHED version of docs/PLAN.md and is now
-      two sessions behind it.
+      three sessions behind it.
+  [ ] Arrow keys inside the SEARCH BOX still move the sidebar cursor. The
+      toolbar was fixed in 0007 (swallow_toolbar_keys); the search input has the
+      same problem and the same one-line fix.
 
-STILL OPEN (neither blocks the rest of M3):
+STILL OPEN:
   D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
       for rigour? Cannot do both first.
   D4  Is `dx serve --platform desktop` in scope at all, or web-only forever?
-      NOTE: M3 raised the cost of a yes. The split assumes a document boundary;
-      desktop has no iframe, so it would need the InProcessChannel path back.
+      NOTE: M3 raised the cost of a yes TWICE. The split assumes a document
+      boundary, and the viewport addon assumes a frame the shell can resize.
+      Desktop has neither, so it would need the InProcessChannel path back and
+      a second answer for the canvas size.
 
 DO NOT DO:
   - Do not reach for `linkme` or `inventory` for the story registry. Both were
@@ -102,21 +104,27 @@ DO NOT DO:
     because the declarations are &'static and both halves share the bundle. It
     is also what makes "the selection map is empty" mean "nothing is changed",
     which is the question the reset button asks. LOG-0006 / G3.
-  - Do not compare a global (or an arg) straight out of a URL against a typed
-    ArgValue. The query-string codec is UNTYPED by design: `theme:dark` decodes
-    as Text, never Variant. Coerce first. LOG-0006 / G2.
+  - Do not compare a global (or an arg, or a viewport name) straight out of a
+    URL against a typed ArgValue. The query-string codec is UNTYPED by design:
+    `theme:dark` decodes as Text, never Variant. Coerce first. LOG-0006 / G2.
   - Do not invent a fourth value vocabulary. args change per story, parameters
-    are static per level, globals change for the whole book — and globals are
-    declared with the SAME `Control` a prop uses, which is what gives them a
-    widget, a URL encoding and a wire encoding for free. LOG-0006 / G1.
+    are static per level, globals change for the whole book. The viewport addon
+    is the worked example of staying inside those three — and the reason its
+    available LIST is a Project declaration rather than a parameter is precisely
+    that ParamValue cannot hold a record. LOG-0006 / G1, LOG-0007 / F2.
   - Do not make the iframe's `src` track live state. Changing `src` reloads the
-    frame; it is computed once at mount and only the reload button touches it.
+    frame; it is computed once at mount, and only the reload button touches it.
+    The viewport changes the frame's STYLE for the same reason. LOG-0007 / F1.
   - Do not let either half act on its own messages. InProcessChannel broadcasts
     to the emitter too; postMessage does not. tests/two_documents.rs holds the
-    line — its harness deliberately has the stricter behaviour.
+    line — its harness deliberately has the stricter behaviour. This also means
+    a test that injects SetCurrentStory moves the PREVIEW only; to test the
+    shell landing somewhere, change the order of the story slice.
   - Do not let the MANAGER call StoryDef::base_args() or render a decorator.
     Both need a live scope and a story, and the manager has neither. The manager
-    is given the Project for ONE reason: the list of globals the toolbar offers.
+    is given the Project for TWO reasons now: the globals the toolbar offers,
+    and the viewports the picker offers. Reading a story's PARAMETERS is fine —
+    they are static data, and the manager needs them to size the frame.
   - Do not render a story body inline in the preview again. Stories get their
     own scope via StoryHost, remounted per story. See LOG-0004 / F2.
   - Do not "simplify" the one-element `for def in [def]` loop around StoryHost
@@ -130,13 +138,17 @@ DO NOT DO:
     value argument. It compiles and it breaks rust-analyzer. See standing facts.
   - Do not construct StoryDef/Meta with struct literals. Fields are private on
     purpose; use the const builders so adding a field stays non-breaking.
+  - Do not derive Default on a config struct whose `const fn new()` is no longer
+    all-zeroes. Project::new() fills in DEFAULT_VIEWPORTS, so a derived Default
+    would have given `#[props(default)]` a different project. LOG-0007 / F5.
   - Do not put ArgType on the wire. It holds &'static str; the manager reads the
     const table directly instead — which works because it shares the bundle.
   - Do not create a signal in a CHILD scope that an ANCESTOR's code writes. The
     channel listener runs in the emitter's scope, so preview signals written by
     the manager must be Signal::new_in_scope(.., ScopeId::ROOT). See LOG-0004/F8.
   - Do not trust a green suite for UI work. 92 tests passed while two real
-    defects sat in the running app. Open the browser and click it.
+    defects sat in the running app; 152 passed while the toolbar's dropdowns
+    were unusable from the keyboard. Open the browser and click it.
   - Do not emit `<label for=..>` unconditionally in the controls panel. Action
     and skipped rows render prose with no control to point at, and radio rows
     key their inputs per option. Use `label_target`. See LOG-0004/F9.
@@ -183,6 +195,17 @@ DO NOT DO:
                                                first parameter anything
                                                reads. 150 tests.
 
+0007  2026-09-06  M3 pt 3: the viewport addon  M3 COMPLETE. The frame's log/0007-m3-viewport.md
+                                               width belongs to the shell,
+                                               so the addon is a <select>
+                                               and a style attribute --
+                                               nothing on the wire. List =
+                                               declaration, choice =
+                                               parameter, selection =
+                                               global. Found a keyboard
+                                               bug no test could.
+                                               152 tests + 19 doctests.
+
 
 --------------------------------------------------------------------------------
  STANDING FACTS  (things that cost time to learn — do not re-derive)
@@ -220,6 +243,25 @@ BROWSER / IFRAME  (session 0005)
     is not. A hook that captures NOTHING and looks `web_sys::window()` up afresh
     satisfies the bound. Chain the previous hook or you lose Dioxus's console
     output. The hook DOES run under `panic = "abort"` — then the module is gone.
+
+THE VIEWPORT ADDON  (session 0007)
+  * The frame's WIDTH BELONGS TO THE SHELL, so "render this story at 360px" is a
+    style attribute on the iframe and nothing else. The story is not told, not
+    re-rendered, and not handed a breakpoint — its own media queries fire
+    because it genuinely is that size. This is the dividend from the M3 split.
+  * Its three halves land on the three mechanisms already here:
+      LIST      -> a declaration on Project (`with_viewports`)
+      CHOICE    -> `parameters { viewport: "mobile" }`, merged innermost-first
+      SELECTION -> the globals ArgMap, under the reserved names `viewport` and
+                   `viewport-rotated`
+    The list could NOT be a parameter: ParamValue is Str|Num|Bool and a viewport
+    is a record. Widening it would have been a fourth vocabulary.
+  * `responsive` is a REAL VALUE, not an absence, because absence already means
+    "whatever this story asked for". `viewport::responsive_needs_saying` is what
+    keeps it out of links where it would mean nothing.
+  * `viewport::resolve` is called by BOTH halves — the manager to size the frame,
+    the preview to fill in StoryContext::viewport. Same reason `landing_story` is
+    shared: two implementations of one rule will drift.
 
 VALUE VOCABULARIES  (there are three, and there must not be a fourth)
   * args      change at run time, scoped to ONE STORY, declared by the props type
@@ -323,6 +365,11 @@ TESTING TRAPS (all produced convincing WRONG answers)
   * macOS `sed -i ''` writes a sibling temp file (`.!PID!name.rs`). dx's file
     watcher latches onto THAT, not your file. Never use it to script an edit for
     a hot-reload measurement; write in place instead.
+  * A HEADLESS VirtualDom CANNOT DELIVER A KEYSTROKE. Everything keyboard-shaped
+    in the shell — the sidebar's arrow navigation, `/` for search, and the fact
+    that a focused toolbar `<select>` was having its arrow keys stolen by that
+    navigation until 0007 — is untested and untestable at this layer. Open the
+    browser. (LOG-0007 / F4.)
   * A substring assertion can pass for the wrong reason. TWICE NOW.
       - `story_bodies_are_invoked_in_scope` asserted the shell contained "ok",
         and "dioxus-storybook" contains "ok" (LOG-0005 / F7).

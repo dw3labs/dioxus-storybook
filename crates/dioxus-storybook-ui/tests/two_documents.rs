@@ -508,3 +508,153 @@ fn the_shell_publishes_globals_even_with_no_story_selected() {
         docs.bus.traffic.borrow()
     );
 }
+
+// ----------------------------------------------------------------- viewport
+
+static SIZES: &[dioxus_storybook_core::Viewport] = &[
+    dioxus_storybook_core::Viewport::new("phone", "Phone", 390, 844),
+    dioxus_storybook_core::Viewport::new("desk", "Desk", 1440, 900),
+];
+
+/// Asks for a phone the way a mobile nav drawer would: statically, per story.
+static ON_A_PHONE: StoryDef = StoryDef::new("Layout/Drawer", "Default", |_| {
+    rsx! { p { "drawer-body" } }
+})
+.with_parameters(dioxus_storybook_core::Parameters::from_static(&[(
+    "viewport",
+    dioxus_storybook_core::ParamValue::Str("phone"),
+)]));
+
+static RESPONSIVE_STORY: StoryDef =
+    StoryDef::new("Layout/Page", "Default", |_| rsx! { p { "page-body" } });
+
+static SIZED: &[&StoryDef] = &[&ON_A_PHONE, &RESPONSIVE_STORY];
+/// The same two, the other way round, so the shell *lands* on the story that
+/// asks for nothing. Which story the manager is showing is decided by its own
+/// signal, and the manager never hears its own `SetCurrentStory`.
+static UNSIZED_FIRST: &[&StoryDef] = &[&RESPONSIVE_STORY, &ON_A_PHONE];
+
+/// Reports the size the preview believes it is, so the *frame's* width and the
+/// *story's* idea of it can be compared across the wire.
+static VIEWPORT_REPORTER: &[Decorator] = &[|ctx: &StoryContext, story: Element| {
+    let seen = match ctx.viewport() {
+        Some(view) => format!("{}-{}x{}", view.name(), view.width(), view.height()),
+        None => "responsive".to_string(),
+    };
+    rsx! { div { class: "vp-{seen}", {story} } }
+}];
+
+fn with_viewports() -> dioxus_storybook_core::Project {
+    dioxus_storybook_core::Project::new()
+        .with_viewports(SIZES)
+        .with_decorators(VIEWPORT_REPORTER)
+}
+
+#[test]
+fn a_story_can_ask_to_open_at_a_size_and_both_halves_agree_on_it() {
+    // The addon in one assertion: the shell sizes the frame, and the story —
+    // in the other document, over the wire — is told the same numbers. They
+    // agree because both halves call `viewport::resolve`, not because anything
+    // was synchronised.
+    let docs = Documents::with_project(SIZED, with_viewports());
+
+    let manager = docs.manager_html();
+    assert!(
+        manager.contains(r#"class="dxsb-stage sized""#),
+        "the frame was not sized: {manager}"
+    );
+    assert!(
+        manager.contains("width:390px;height:844px"),
+        "the frame is the wrong size: {manager}"
+    );
+    assert!(
+        docs.preview_html().contains(r#"class="vp-phone-390x844""#),
+        "the story was not told its size: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn a_responsive_canvas_puts_no_size_on_the_frame() {
+    let docs = Documents::with_project(UNSIZED_FIRST, with_viewports());
+
+    let manager = docs.manager_html();
+    // `class="..."`, not a bare class name: this document inlines the whole
+    // stylesheet, which names `.dxsb-stage.sized` whether one rendered or not.
+    assert!(!manager.contains(r#"class="dxsb-stage sized""#), "got: {manager}");
+    assert!(manager.contains(r#"class="dxsb-stage""#), "got: {manager}");
+    assert!(
+        docs.preview_html().contains(r#"class="vp-responsive""#),
+        "got: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn the_viewport_travels_as_a_global_and_outlives_the_story_it_was_set_on() {
+    // It is carried in the globals map rather than a channel of its own, which
+    // is what gives it a URL encoding, a wire encoding and a place in
+    // `StoryContext` with no new code. This is the wire half of that claim.
+    let mut docs = Documents::with_project(SIZED, with_viewports());
+    says(
+        &mut docs,
+        ViewMode::Manager,
+        Event::SetGlobals {
+            globals: ArgMap::new()
+                .with("viewport", ArgValue::Variant("desk".into()))
+                .with("viewport-rotated", ArgValue::Bool(true)),
+        },
+    );
+    assert!(
+        docs.preview_html().contains(r#"class="vp-desk-900x1440""#),
+        "got: {}",
+        docs.preview_html()
+    );
+
+    // ...and a chosen size is not a property of the story you chose it on.
+    select(&mut docs, "layout-page--default");
+    let preview = docs.preview_html();
+    assert!(preview.contains("page-body"), "the story did not change: {preview}");
+    assert!(preview.contains("vp-desk-900x1440"), "the viewport did not survive: {preview}");
+}
+
+#[test]
+fn a_selection_beats_the_story_parameter_across_the_wire() {
+    let mut docs = Documents::with_project(SIZED, with_viewports());
+    assert!(docs.preview_html().contains("vp-phone-390x844"));
+    says(
+        &mut docs,
+        ViewMode::Manager,
+        Event::SetGlobals {
+            globals: ArgMap::new().with("viewport", ArgValue::Variant("responsive".into())),
+        },
+    );
+    assert!(
+        docs.preview_html().contains(r#"class="vp-responsive""#),
+        "a phone story could not be looked at full width: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn the_picker_is_there_by_default_and_gone_when_the_project_offers_no_sizes() {
+    let docs = Documents::with_project(SIZED, with_viewports());
+    assert!(
+        docs.manager_html().contains(r#"class="dxsb-viewport""#),
+        "no picker: {}",
+        docs.manager_html()
+    );
+
+    let none = Documents::with_project(
+        SIZED,
+        dioxus_storybook_core::Project::new()
+            .with_viewports(&[])
+            .with_decorators(VIEWPORT_REPORTER),
+    );
+    let manager = none.manager_html();
+    assert!(!manager.contains(r#"class="dxsb-viewport""#), "got: {manager}");
+    // ...and the story that asked for a phone gets a responsive canvas, rather
+    // than a size nothing in this build can offer.
+    assert!(!manager.contains(r#"class="dxsb-stage sized""#), "got: {manager}");
+    assert!(none.preview_html().contains(r#"class="vp-responsive""#));
+}

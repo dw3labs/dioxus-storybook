@@ -1,9 +1,14 @@
-//! The globals toolbar.
+//! The toolbar addons: the globals bar and the viewport picker.
 //!
-//! Manager-side, like every other addon surface: it edits the manager's globals
-//! signal, which goes out on the [`Channel`] as
-//! [`Event::SetGlobals`](dioxus_storybook_core::Event::SetGlobals). It never
+//! Manager-side, like every other addon surface: both edit the manager's
+//! globals signal, which goes out on the [`Channel`] as
+//! [`Event::SetGlobals`](dioxus_storybook_core::Event::SetGlobals). Neither
 //! touches the preview.
+//!
+//! The viewport is the one that needs the least of the preview: the frame's
+//! width belongs to the shell, so a viewport change is a style attribute, not a
+//! message. It rides along in `SetGlobals` anyway — the story is entitled to
+//! know what size it was put at, and the URL is entitled to carry it.
 //!
 //! # Why it is not the controls panel
 //!
@@ -17,7 +22,8 @@
 //! [`Channel`]: dioxus_storybook_core::Channel
 
 use dioxus::prelude::*;
-use dioxus_storybook_core::{ArgMap, ArgValue, Control, GlobalType};
+use dioxus_storybook_core::viewport::RESPONSIVE;
+use dioxus_storybook_core::{ArgMap, ArgValue, Control, GlobalType, Viewport, ViewportSelection};
 
 /// One control per declared global, or nothing at all when none are declared.
 #[component]
@@ -160,6 +166,77 @@ fn GlobalPicker(
         label { class: "dxsb-global", r#for: "{field_id}", title: "{hint}",
             span { class: "dxsb-global-title", "{global.title()}" }
             {widget}
+        }
+    }
+}
+
+/// The viewport picker: the size of the frame, and which way up.
+///
+/// The one addon that needs nothing from the preview. A viewport *is* the
+/// frame's width, and the shell owns the frame — so this component picks a
+/// number and the story finds out the way a real page does, by being that
+/// size. Nothing is measured, nothing is injected, and the story's own media
+/// queries do the rest.
+///
+/// It is rendered next to [`GlobalsBar`] and not inside it because the
+/// selection is not a *declared* global: the project does not list it, the
+/// widget is not one of the [`Control`] widgets, and it carries a second
+/// control — rotation — that no declared global has.
+#[component]
+pub fn ViewportPicker(
+    available: &'static [Viewport],
+    /// The size in force, or `None` for a responsive canvas.
+    selection: Option<ViewportSelection>,
+    on_pick: EventHandler<String>,
+    on_rotate: EventHandler<()>,
+) -> Element {
+    if available.is_empty() {
+        return rsx! {};
+    }
+    let current = selection.map(|s| s.name()).unwrap_or(RESPONSIVE);
+    let field_id = "dxsb-viewport";
+    rsx! {
+        div { class: "dxsb-viewport",
+            label { class: "dxsb-global", r#for: "{field_id}", title: "The size of the story canvas",
+                span { class: "dxsb-global-title", "Viewport" }
+                select {
+                    id: "{field_id}",
+                    name: "viewport",
+                    class: "dxsb-globals-input",
+                    onchange: move |e| on_pick.call(e.value()),
+                    option {
+                        value: "{RESPONSIVE}",
+                        selected: current == RESPONSIVE,
+                        "Responsive"
+                    }
+                    for view in available.iter() {
+                        option {
+                            key: "{view.name()}",
+                            value: "{view.name()}",
+                            selected: current == view.name(),
+                            "{view.title()} — {view.width()}×{view.height()}"
+                        }
+                    }
+                }
+            }
+            // Rotation is meaningless without a fixed size, so the button is
+            // present-but-disabled rather than appearing and disappearing: a
+            // control that moves the ones next to it is worse than a dim one.
+            button {
+                class: "dxsb-viewport-rotate",
+                title: "Turn the canvas on its side",
+                disabled: selection.is_none(),
+                onclick: move |_| on_rotate.call(()),
+                "⟳"
+            }
+            if let Some(selection) = selection {
+                // Read off the selection, not off the viewport: under rotation
+                // these are the declared numbers the other way round, and the
+                // dropdown still shows them unrotated.
+                span { class: "dxsb-viewport-size",
+                    "{selection.width()}×{selection.height()}"
+                }
+            }
         }
     }
 }
