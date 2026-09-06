@@ -102,6 +102,36 @@
 //! nest in that order, outermost first. Parameters come at the same three and
 //! merge the other way: the innermost level that sets a key wins.
 //!
+//! # Globals
+//!
+//! A global is a value the *toolbar* selects and every story sees — a theme, a
+//! locale, a text direction. It is not a prop: no story declares one, and it
+//! survives moving between stories, which is the point. Flip the theme, then
+//! walk the sidebar looking for the component that forgot about it.
+//!
+//! ```ignore
+//! static GLOBALS: &[GlobalType] = &[
+//!     GlobalType::select("theme", &["light", "dark"]).with_title("Theme"),
+//! ];
+//! static PROJECT: Project = Project::new()
+//!     .with_globals(GLOBALS)
+//!     .with_decorators(&[themed]);
+//!
+//! fn themed(ctx: &StoryContext, story: Element) -> Element {
+//!     let theme = ctx.globals().get("theme").map(ArgValue::as_text).unwrap_or_default();
+//!     rsx! { div { class: "{theme}", {story} } }
+//! }
+//! ```
+//!
+//! Globals live in the URL too (`&globals=theme:dark`), so a link carries the
+//! toolbar with it.
+//!
+//! # `parameters.layout`
+//!
+//! One parameter is read by the canvas itself: `layout` is `"centered"` (the
+//! default), `"padded"`, or `"fullscreen"`. A decorator that paints a background
+//! wants `"fullscreen"` — canvas padding is surface a decorator cannot reach.
+//!
 //! # Design notes worth knowing
 //!
 //! - **Stories are `fn` pointers.** `rsx!` and `EventHandler::new` need an
@@ -149,9 +179,9 @@ pub mod prelude {
 
     pub use dioxus_storybook_core::{
         ActionSink, ArgMap, ArgType, ArgValue, ArgsHandle, Control,
-        ControlEnum as ControlEnumTrait, Controllable, Decorator, FromArg, Meta, ParamValue,
-        Parameters, Project, Registry, ResolvedParameters, StoryContext, StoryDef, ToArg,
-        use_args,
+        ControlEnum as ControlEnumTrait, Controllable, Decorator, FromArg, GlobalType, Meta,
+        ParamValue, Parameters, Project, Registry, ResolvedParameters, StoryContext, StoryDef,
+        ToArg, use_args,
     };
     pub use dioxus_storybook_macro::{ControlEnum, Controls, story, story_meta};
     pub use dioxus_storybook_ui::Storybook;

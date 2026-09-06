@@ -134,6 +134,7 @@ pub fn encode(from: ViewMode, event: &Event) -> String {
         Event::StoryPrepared { id, initial_args } => {
             ("prepared", vec![id.clone(), encode_args(initial_args)])
         }
+        Event::SetGlobals { globals } => ("setglobals", vec![encode_args(globals)]),
         Event::ResetArgs { id } => ("reset", vec![id.clone()]),
         Event::StoryRendered { id } => ("rendered", vec![id.clone()]),
         Event::StoryMissing { id } => ("missing", vec![id.clone()]),
@@ -189,6 +190,7 @@ pub fn decode(receiver: ViewMode, raw: &str) -> Option<Event> {
             let (id, args) = two()?;
             Event::StoryPrepared { id, initial_args: decode_args(&args) }
         }
+        "setglobals" => Event::SetGlobals { globals: decode_args(&one()?) },
         "reset" => Event::ResetArgs { id: one()? },
         "rendered" => Event::StoryRendered { id: one()? },
         "missing" => Event::StoryMissing { id: one()? },

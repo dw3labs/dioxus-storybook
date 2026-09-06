@@ -8,7 +8,7 @@
 //! apply in is what makes them composable.
 
 use dioxus_storybook::prelude::*;
-use dioxus_storybook::{Decorator, ParamValue, Project, StoryContext, StoryDef};
+use dioxus_storybook::{Decorator, GlobalType, ParamValue, Project, StoryContext, StoryDef};
 
 // ------------------------------------------------------------------ merging
 
@@ -86,12 +86,27 @@ fn iterating_lists_each_key_once_with_its_winning_value() {
 /// Rendering has to happen inside a live Dioxus scope — decorators use `rsx!`
 /// exactly as story bodies do.
 fn render_in_scope(def: &'static StoryDef, project: Project, args: ArgMap) -> String {
+    render_with_globals(def, project, args, ArgMap::new())
+}
+
+/// The same, with toolbar globals in force.
+fn render_with_globals(
+    def: &'static StoryDef,
+    project: Project,
+    args: ArgMap,
+    globals: ArgMap,
+) -> String {
     #[component]
-    fn Harness(def: &'static StoryDef, project: Project, args: ArgMap) -> Element {
-        def.render_decorated(project, &args)
+    fn Harness(
+        def: &'static StoryDef,
+        project: Project,
+        args: ArgMap,
+        globals: ArgMap,
+    ) -> Element {
+        def.render_decorated(project, &args, &globals)
     }
     let mut dom =
-        VirtualDom::new_with_props(Harness, HarnessProps { def, project, args });
+        VirtualDom::new_with_props(Harness, HarnessProps { def, project, args, globals });
     dom.rebuild_in_place();
     dioxus_ssr::render(&dom)
 }
@@ -262,10 +277,114 @@ mod authored {
     fn render(def: &'static dioxus_storybook::StoryDef) -> String {
         #[component]
         fn Harness(def: &'static dioxus_storybook::StoryDef) -> Element {
-            def.render_decorated(Project::new(), &ArgMap::new())
+            def.render_decorated(Project::new(), &ArgMap::new(), &ArgMap::new())
         }
         let mut dom = VirtualDom::new_with_props(Harness, HarnessProps { def });
         dom.rebuild_in_place();
         dioxus_ssr::render(&dom)
     }
+}
+
+// ------------------------------------------------------------------ globals
+
+static GLOBALS: &[GlobalType] = &[
+    GlobalType::select("theme", &["light", "dark"]).with_title("Theme"),
+    GlobalType::toggle("rtl", false),
+    GlobalType::new("locale", ParamValue::Str("en")),
+];
+
+static THEMED: &[Decorator] = &[|ctx: &StoryContext, story: Element| {
+    let g = ctx.globals();
+    let theme = g.get("theme").map(ArgValue::as_text).unwrap_or_default();
+    let rtl = g.get("rtl").and_then(ArgValue::as_bool).unwrap_or(false);
+    let locale = g.get("locale").map(ArgValue::as_text).unwrap_or_default();
+    let dir = if rtl { "rtl" } else { "ltr" };
+    rsx! { div { class: "{theme} {locale}", dir: "{dir}", {story} } }
+}];
+
+static THEMED_STORY: StoryDef =
+    StoryDef::new("Forms/Button", "Themed", |_| rsx! { p { "x" } }).with_decorators(THEMED);
+
+fn themed_project() -> Project {
+    Project::new().with_globals(GLOBALS)
+}
+
+#[test]
+fn a_decorator_sees_every_declared_global_even_before_the_toolbar_is_touched() {
+    // Totality is the point: a decorator reading a global must never have to
+    // handle "nobody has picked one yet".
+    let html = render_with_globals(&THEMED_STORY, themed_project(), ArgMap::new(), ArgMap::new());
+    assert_eq!(html, r#"<div class="light en" dir="ltr"><p>x</p></div>"#);
+}
+
+#[test]
+fn a_selected_global_overrides_its_default() {
+    let selected = ArgMap::new()
+        .with("theme", ArgValue::Variant("dark".into()))
+        .with("rtl", ArgValue::Bool(true));
+    let html = render_with_globals(&THEMED_STORY, themed_project(), ArgMap::new(), selected);
+    assert_eq!(html, r#"<div class="dark en" dir="rtl"><p>x</p></div>"#);
+}
+
+#[test]
+fn a_global_arriving_as_untyped_text_is_forced_into_its_declared_shape() {
+    // This is the shape a value has when it comes out of a URL: the query-string
+    // codec cannot know that `theme:dark` was a variant or that `rtl:!true` was
+    // meant for a toggle. `GlobalType::coerce` restores it, the same way the
+    // generated applier restores an arg's type.
+    let from_a_link = ArgMap::new()
+        .with("theme", ArgValue::Text("dark".into()))
+        .with("rtl", ArgValue::Text("true".into()));
+    let resolved = themed_project().resolved_globals(&from_a_link);
+    assert_eq!(resolved.get("theme"), Some(&ArgValue::Variant("dark".into())));
+    assert_eq!(resolved.get("rtl"), Some(&ArgValue::Bool(true)));
+}
+
+#[test]
+fn an_unconvertible_value_falls_back_to_the_default_rather_than_failing() {
+    let nonsense = ArgMap::new().with("rtl", ArgValue::Text("yes please".into()));
+    let resolved = themed_project().resolved_globals(&nonsense);
+    assert_eq!(resolved.get("rtl"), Some(&ArgValue::Bool(false)));
+}
+
+#[test]
+fn a_global_that_no_longer_exists_is_carried_but_ignored() {
+    // A link from before a global was renamed or removed. It must land on the
+    // story, not on an error.
+    let stale = ArgMap::new().with("gone", ArgValue::Text("whatever".into()));
+    let resolved = themed_project().resolved_globals(&stale);
+    assert_eq!(resolved.get("theme"), Some(&ArgValue::Variant("light".into())));
+    assert_eq!(resolved.get("gone"), Some(&ArgValue::Text("whatever".into())));
+}
+
+#[test]
+fn a_select_global_defaults_to_its_first_option() {
+    assert_eq!(
+        GlobalType::select("theme", &["light", "dark"]).default_value(),
+        ArgValue::Variant("light".into())
+    );
+    // An empty list is a mistake worth seeing on screen, not a panic on the way.
+    assert_eq!(
+        GlobalType::select("empty", &[]).default_value(),
+        ArgValue::Variant(String::new())
+    );
+}
+
+#[test]
+fn a_project_with_no_globals_gives_a_decorator_an_empty_set() {
+    let resolved = Project::new().resolved_globals(&ArgMap::new());
+    assert!(resolved.is_empty());
+}
+
+#[test]
+fn a_selection_equal_to_the_default_is_not_a_selection() {
+    use dioxus_storybook::globals::is_default;
+    assert!(is_default(GLOBALS, "theme", &ArgValue::Variant("light".into())));
+    // Untyped, as it would arrive from a link — still recognised.
+    assert!(is_default(GLOBALS, "theme", &ArgValue::Text("light".into())));
+    assert!(!is_default(GLOBALS, "theme", &ArgValue::Variant("dark".into())));
+    assert!(is_default(GLOBALS, "rtl", &ArgValue::Bool(false)));
+    assert!(!is_default(GLOBALS, "rtl", &ArgValue::Bool(true)));
+    // Nothing to compare an undeclared name to.
+    assert!(!is_default(GLOBALS, "gone", &ArgValue::Text("x".into())));
 }

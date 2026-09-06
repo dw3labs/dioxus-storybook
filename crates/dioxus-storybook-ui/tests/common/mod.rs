@@ -149,6 +149,7 @@ impl Documents {
             StorybookManager,
             StorybookManagerProps {
                 registry,
+                project,
                 channel: ChannelHandle::new(DocChannel {
                     mode: ViewMode::Manager,
                     bus: Rc::clone(&bus),

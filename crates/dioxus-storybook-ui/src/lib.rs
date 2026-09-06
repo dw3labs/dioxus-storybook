@@ -36,6 +36,7 @@
 mod browser;
 mod panels;
 mod style;
+mod toolbar;
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -45,6 +46,8 @@ use dioxus_storybook_core::{
     ActionSink, ArgMap, ArgValue, ArgsHandle, Channel, ChannelHandle, Event, Project, Registry,
     Row, RowKind, StoryDef, UrlState, ViewMode, flatten,
 };
+
+use toolbar::GlobalsBar;
 
 use panels::{ACTION_LOG_CAP, ActionEntry, AddonPanel, PanelTab};
 
@@ -106,10 +109,10 @@ pub fn Storybook(registry: Registry, #[props(default)] project: Project) -> Elem
         // `ViewMode` is `#[non_exhaustive]`, and an unrecognised mode is the
         // shell for the same reason a bare URL is.
         //
-        // The project is deliberately *not* passed here. Decorators render
-        // stories, and the shell renders none — reading them in this document
-        // would be the first crack in the split.
-        _ => rsx! { StorybookManager { registry, channel } },
+        // The manager takes the project too, but for one thing only: the list
+        // of globals the toolbar has to offer. It must never *render* with it —
+        // decorators wrap stories, and the shell renders none.
+        _ => rsx! { StorybookManager { registry, channel, project } },
     }
 }
 
@@ -142,7 +145,11 @@ pub fn StorybookPreview(
 /// [`Storybook`] mounts this for you. See [`StorybookPreview`] for when you
 /// would reach for it directly.
 #[component]
-pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
+pub fn StorybookManager(
+    registry: Registry,
+    channel: ChannelHandle,
+    #[props(default)] project: Project,
+) -> Element {
     // Provided as context so an addon panel — and the inline preview, where
     // there is one — talks to the bus without either half holding the other's
     // signals.
@@ -156,6 +163,11 @@ pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
 
     let mut selected = use_signal(|| landing.clone());
     let mut args = use_signal(|| initial.args.clone());
+    // The *selections* only. Declared defaults are filled in on the way out, by
+    // both halves independently, because the declarations are `&'static` and
+    // both halves share the bundle. Putting them on the wire or in the link
+    // would only make both longer and let them go stale.
+    let mut globals = use_signal(|| initial.globals.clone());
     let mut query = use_signal(String::new);
     let mut collapsed = use_signal(BTreeSet::<String>::new);
     let mut cursor = use_signal(|| 0usize);
@@ -253,12 +265,19 @@ pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
     use_effect(move || {
         let id = selected();
         let current_args = args();
+        let current_globals = globals();
         // Read, not ignored: this is what subscribes the effect to the
         // handshake, so a preview that (re)mounts gets the current state.
         let _ = handshake();
         browser::write_url_state(&UrlState {
             id: id.clone(),
             args: current_args.clone(),
+            globals: current_globals.clone(),
+        });
+        // Globals first, and outside the `if`: they are not about any one story,
+        // and a book with no story selected still has a theme.
+        publisher.emit(Event::SetGlobals {
+            globals: current_globals,
         });
         if let Some(id) = id {
             publisher.emit(Event::SetCurrentStory { id: id.clone() });
@@ -325,6 +344,7 @@ pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
         browser::preview_src(&UrlState {
             id: landing.clone(),
             args: initial.args.clone(),
+            globals: initial.globals.clone(),
         })
     });
     // Bumped only by the reload button. Changing `src` is what reloads an
@@ -431,7 +451,36 @@ pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
             }
 
             main { class: "dxsb-main",
-                Toolbar { story: current }
+                Toolbar {
+                    story: current,
+                    globals: rsx! {
+                        GlobalsBar {
+                            declared: project.globals(),
+                            values: project.resolved_globals(&globals()),
+                            changed: !globals().is_empty(),
+                            on_set: move |(name, value): (String, ArgValue)| {
+                                // Into the manager's own signal; the effect above
+                                // is what puts it on the channel and in the URL.
+                                //
+                                // A value equal to the declared default is
+                                // *removed* rather than stored: only real
+                                // selections belong in a link, and it is what
+                                // makes an empty map mean "nothing is changed".
+                                let mut selections = globals.write();
+                                if dioxus_storybook_core::globals::is_default(
+                                    project.globals(),
+                                    &name,
+                                    &value,
+                                ) {
+                                    selections.remove(&name);
+                                } else {
+                                    selections.set(name, value);
+                                }
+                            },
+                            on_reset: move |()| globals.set(ArgMap::new()),
+                        }
+                    },
+                }
                 if let Some(message) = dead() {
                     PreviewDied {
                         message,
@@ -441,6 +490,7 @@ pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
                             let base = browser::preview_src(&UrlState {
                                 id: selected(),
                                 args: args(),
+                                globals: globals(),
                             });
                             frame_src.set(format!("{base}&dxsb-reload={next}"));
                             dead.set(None);
@@ -538,9 +588,15 @@ fn SidebarRow(
 }
 
 #[component]
-fn Toolbar(story: Option<&'static StoryDef>) -> Element {
+fn Toolbar(story: Option<&'static StoryDef>, globals: Element) -> Element {
     let Some(story) = story else {
-        return rsx! { header { class: "dxsb-toolbar", span { class: "dxsb-crumb", "No story selected" } } };
+        return rsx! {
+            header { class: "dxsb-toolbar",
+                span { class: "dxsb-crumb", "No story selected" }
+                span { class: "dxsb-spacer" }
+                {globals}
+            }
+        };
     };
     let id = story.id();
     rsx! {
@@ -556,6 +612,7 @@ fn Toolbar(story: Option<&'static StoryDef>) -> Element {
                 span { "{story.name()}" }
             }
             span { class: "dxsb-spacer" }
+            {globals}
             span { class: "dxsb-tagrow",
                 for tag in story.tags().iter() {
                     span { class: "dxsb-tag", "{tag}" }
@@ -646,10 +703,15 @@ fn Preview(registry: Registry, project: Project) -> Element {
     // Rooting the ownership fixes it without moving the state up into the
     // manager, which would break the rule that the preview learns everything
     // over the channel.
-    let (current, args) = use_hook(|| {
+    let (current, args, globals) = use_hook(|| {
         (
             Signal::new_in_scope(landing_story(registry, startup.id.as_deref()), ScopeId::ROOT),
             Signal::new_in_scope(startup.args.clone(), ScopeId::ROOT),
+            // Read from this document's own URL, like everything else here: the
+            // frame's `src` carries the globals so the first paint is already
+            // themed, rather than flashing the default and correcting once the
+            // handshake completes.
+            Signal::new_in_scope(startup.globals.clone(), ScopeId::ROOT),
         )
     });
 
@@ -657,10 +719,11 @@ fn Preview(registry: Registry, project: Project) -> Element {
     // this component and unsubscribes on unmount.
     use_hook(|| {
         Rc::new(channel.subscribe(Rc::new(move |event: &Event| {
-            let (mut current, mut args) = (current, args);
+            let (mut current, mut args, mut globals) = (current, args, globals);
             match event {
                 Event::SetCurrentStory { id } => current.set(Some(id.clone())),
                 Event::UpdateArgs { args: incoming, .. } => args.set(incoming.clone()),
+                Event::SetGlobals { globals: incoming } => globals.set(incoming.clone()),
                 Event::ResetArgs { .. } => args.set(ArgMap::new()),
                 _ => {}
             }
@@ -689,10 +752,21 @@ fn Preview(registry: Registry, project: Project) -> Element {
 
     let story = current().and_then(|id| registry.get(&id));
     let overrides = args();
+    let selected_globals = globals();
+
+    // The first thing to read a parameter. `layout` is the one Storybook's
+    // canvas reads too, and it is the only decision about the *surface* a story
+    // gets to make: whether the canvas centres it, stacks it at the top, or
+    // hands over the whole frame. A decorator painting a theme needs the last
+    // one, because 40px of canvas padding is 40px it cannot paint.
+    let layout = story
+        .map(|def| canvas_layout(def.resolved_parameters(project).str("layout")))
+        .unwrap_or("centered");
+    let canvas_class = format!("dxsb-canvas layout-{layout}");
 
     match story {
         Some(def) => rsx! {
-            section { class: "dxsb-canvas",
+            section { class: "{canvas_class}",
                 // A keyed list of exactly one. That is not a flourish: Dioxus
                 // only honours `key` when diffing a list, and what is needed
                 // here is a *remount* when the story changes. Rendering story
@@ -704,13 +778,14 @@ fn Preview(registry: Registry, project: Project) -> Element {
                         key: "{def.id()}",
                         story: def,
                         args: overrides.clone(),
+                        globals: selected_globals.clone(),
                         project,
                     }
                 }
             }
         },
         None => rsx! {
-            section { class: "dxsb-canvas",
+            section { class: "{canvas_class}",
                 div { class: "dxsb-blank",
                     if registry.is_empty() {
                         "No stories were registered. Add a "
@@ -722,6 +797,19 @@ fn Preview(registry: Registry, project: Project) -> Element {
                 }
             }
         },
+    }
+}
+
+/// The canvas layout a story asked for, or `"centered"` if it asked for
+/// nothing this understands.
+///
+/// An unrecognised value is not an error: parameters are an open, stringly-typed
+/// space shared with addons that this build may not have, and a story whose
+/// `layout` is a typo should still render.
+fn canvas_layout(requested: Option<&'static str>) -> &'static str {
+    match requested {
+        Some(layout @ ("centered" | "padded" | "fullscreen")) => layout,
+        _ => "centered",
     }
 }
 
@@ -740,7 +828,12 @@ fn Preview(registry: Registry, project: Project) -> Element {
 ///   — the manager must not compute it, because from M3 the story functions live
 ///   in the other bundle.
 #[component]
-fn StoryHost(story: &'static StoryDef, args: ArgMap, project: Project) -> Element {
+fn StoryHost(
+    story: &'static StoryDef,
+    args: ArgMap,
+    globals: ArgMap,
+    project: Project,
+) -> Element {
     let channel: ChannelHandle = use_context();
     let id = story.id();
 
@@ -783,7 +876,7 @@ fn StoryHost(story: &'static StoryDef, args: ArgMap, project: Project) -> Elemen
     // scope, because `rsx!` and `EventHandler::new` need one — and so do the
     // decorators wrapped around it, which is the other reason this is a
     // component rather than a few lines in `Preview`.
-    story.render_decorated(project, &args)
+    story.render_decorated(project, &args, &globals)
 }
 
 #[component]

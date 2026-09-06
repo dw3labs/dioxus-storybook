@@ -3,7 +3,21 @@
 //! This crate is the part that has no opinion about rendering: the story
 //! description ([`StoryDef`], [`Meta`]), the dynamic-argument vocabulary
 //! ([`ArgType`], [`ArgValue`], [`ArgMap`]), the sidebar index ([`Registry`]),
-//! URL state ([`url`]), and the manager ↔ preview bus ([`Channel`]).
+//! URL state ([`url`]), the manager ↔ preview bus ([`Channel`]) and its
+//! [`wire`] format, and the three things a story inherits rather than declares:
+//! [`Decorator`]s, [`Parameters`] and [`GlobalType`]s.
+//!
+//! # Three value vocabularies, and why there are exactly three
+//!
+//! | | changes at run time | scope |
+//! |---|---|---|
+//! | [`ArgValue`] args | yes | one story |
+//! | [`ParamValue`] parameters | no | a level: project, component or story |
+//! | globals | yes | the whole book |
+//!
+//! Globals are not a fourth: they are declared with the same [`Control`] a prop
+//! uses and carried in an [`ArgMap`], which is what gives them a widget, a URL
+//! encoding and a wire encoding for free. See [`globals`].
 //!
 //! You normally depend on `dioxus-storybook` and use its prelude instead of
 //! reaching in here.
@@ -28,6 +42,7 @@ pub mod actions;
 pub mod args;
 pub mod arg_type;
 pub mod channel;
+pub mod globals;
 pub mod registry;
 pub mod story;
 pub mod url;
@@ -37,6 +52,7 @@ pub use actions::{ActionSink, ArgsHandle, use_args};
 pub use arg_type::{ArgType, Control};
 pub use args::{ArgMap, ArgValue, ControlEnum, Controllable, FromArg, ToArg};
 pub use channel::{Channel, ChannelHandle, Event, InProcessChannel, Listener, Subscription};
+pub use globals::GlobalType;
 pub use registry::{
     Group, Registry, Row, RowKind, StoryRef, TreeNode, flatten, fuzzy_score, group_paths,
 };

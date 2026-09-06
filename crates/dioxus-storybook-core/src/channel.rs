@@ -86,6 +86,16 @@ pub enum Event {
         /// The story's own arg values, before any URL or panel overlay.
         initial_args: ArgMap,
     },
+    /// The manager changed the toolbar globals.
+    ///
+    /// Authoritative and complete, like [`Event::UpdateArgs`] — the receiver
+    /// replaces its set rather than merging. Only the *selected* values travel;
+    /// each side fills in the declared defaults itself, because the
+    /// declarations are `&'static` and both halves share the bundle.
+    SetGlobals {
+        /// Every global the toolbar has been moved off its default.
+        globals: ArgMap,
+    },
     /// The manager asked to drop overrides and fall back to story defaults.
     ResetArgs {
         /// The story the reset applies to.

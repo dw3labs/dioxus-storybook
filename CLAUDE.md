@@ -6,8 +6,8 @@ isolation, driven by controls auto-generated from the props type, and later
 doubling as tests and documentation.
 
 **Status:** M0 (spikes), M1 (walking skeleton) and M2 (controls & actions)
-complete. M3 in progress — the iframe split, decorators and parameters are done;
-globals/toolbar and the environment addons are not.
+complete. M3 in progress — the iframe split, decorators, parameters, panic
+reporting and globals/toolbar are done; only the environment addons are left.
 **Scope:** a publishable open-source crate — semver + docs discipline apply.
 **Name:** `dioxus-storybook` · MIT · © DW3Labs.
 **Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
@@ -55,6 +55,7 @@ log/
   0003-m1-walking-skeleton.md
   0004-m2-controls-and-actions.md
   0005-m3-isolation.md
+  0006-m3-globals-and-toolbar.md
 docs/
   PLAN.md                  the working plan: features, problems, milestones
   M0-FINDINGS.md           full spike write-up
@@ -81,7 +82,7 @@ Cargo.toml                 workspace (edition 2024)
 # Run the storybook. This is the main loop.
 cd examples/button-gallery && dx serve --platform web
 
-# The whole suite: 130 tests + 11 doctests. Everything must stay green.
+# The whole suite: 150 tests + 13 doctests. Everything must stay green.
 cargo test --workspace
 
 # Definition of done for anything macro-facing. Must be clean.
@@ -113,6 +114,8 @@ cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
 | Panics | a **panic hook** posts `PreviewPanicked`; there is no recovery | `panic = "abort"` means the module is gone, not unwound |
 | Decorators | `fn(&StoryContext, Element) -> Element` at three levels | a context struct now, because widening the signature later would break every decorator |
 | Parameters | **`ResolvedParameters`** consults three levels in order | no allocation, stays `Copy`, innermost wins |
+| Globals | **args machinery reused** — a `Control` declaration, an `ArgMap` of values | widget, URL encoding and wire encoding all came free; there must not be a fourth value vocabulary |
+| Globals on the wire | **only the selections**, never the resolved set | both halves share the `&'static` declarations, and an empty map then means "nothing changed" |
 | Platform | **web-first** | the static build is both the shareable artifact and the screenshot-test substrate |
 | Story bodies | **fn pointers invoked in-scope** | `rsx!`/`EventHandler::new` need an active Dioxus scope |
 | Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |

@@ -9,8 +9,9 @@ PROJECT   A native Storybook for Dioxus: a component workbench where each
 STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
           M1 (walking skeleton) COMPLETE — browse + render + URL state.
           M2 (controls & actions) COMPLETE — the workbench is editable.
-          M3 (isolation, globals, environment) IN PROGRESS — 3 of 6 items done:
-            the iframe split, decorators + parameters, panic reporting.
+          M3 (isolation, globals, environment) IN PROGRESS — 5 of 6 items done:
+            the iframe split, decorators + parameters, panic reporting,
+            globals + toolbar. Only the environment addons are left.
 SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
 NAME      dioxus-storybook · MIT · (c) DW3Labs
 TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
@@ -20,42 +21,47 @@ TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
  HOT — what happens next
 --------------------------------------------------------------------------------
 
-NOTHING IS BLOCKED. Session 0005 shipped the biggest slice of M3: the preview
-now renders in an IFRAME, as its own document, over a postMessage transport.
+NOTHING IS BLOCKED. M3 is one item from done. Session 0005 put the preview in an
+iframe over postMessage; session 0006 added globals, the toolbar, and the first
+parameter anything actually reads.
 
-THE FIRST QUESTION IS ANSWERED. "Does the manager bundle still link the
-registry?" — YES, because there is only one bundle. The manager points its
-iframe at its OWN URL with `?viewMode=preview`; the same wasm loads twice and
-each copy renders a different half. So ArgType stays `&'static` on both sides
-and nothing on the wire needed a DTO. See LOG-0005 / F1.
-
-DONE IN M3 SO FAR
+DONE IN M3
   [x] Manager/preview split + postMessage Channel. No addon changed.
   [x] Decorators at 3 levels (project -> component -> story, outermost first).
   [x] Parameters with merge semantics (ResolvedParameters, innermost wins).
   [x] Panic reporting: the preview's panic hook posts Event::PreviewPanicked,
       the shell shows it with a "Reload the preview" button.
+  [x] Globals + toolbar. Declared on the Project, carried in the URL as
+      `&globals=theme:dark`, on the wire as Event::SetGlobals, and read by
+      decorators through StoryContext::globals().
+  [x] parameters.layout — centered / padded / fullscreen. The first consumer of
+      ResolvedParameters, and the worked example for the addons below.
 
-NEXT UP (the rest of M3)
-  [ ] Globals + toolbar. Storybook's "globals" are toolbar-selected values
-      (theme, locale) that every story sees. They belong on the wire and in
-      StoryContext — which is #[non_exhaustive] and was built to grow this way.
-  [ ] viewport / backgrounds / measure / outline addons. These are the first
-      real consumers of ResolvedParameters, which nothing reads yet. `viewport`
-      is nearly free now: the preview is a frame whose width the shell owns.
+NEXT UP (the last M3 item)
+  [ ] viewport / backgrounds / measure / outline addons.
+      - viewport is nearly free and is the one to do first: the preview is a
+        frame whose WIDTH THE SHELL OWNS, so it is a class on .dxsb-frame plus a
+        picker that looks exactly like the globals toolbar. In Storybook the
+        SELECTED viewport is globals state and the AVAILABLE LIST is a
+        parameter — which now maps cleanly onto both mechanisms this project
+        has, so copy that split rather than inventing one.
+      - backgrounds overlaps with what the example's theme decorator already
+        does by hand. DECIDE FIRST whether it is a built-in addon or just the
+        documented decorator pattern; do not write both.
+      - measure / outline are preview-side overlays driven by a global toggle.
   [ ] ErrorBoundary for Element-level errors. DISTINCT from the panic hook,
-      which is done. `ErrorBoundary` catches a story returning `Err`; it cannot
-      catch a panic, because wasm here is panic="abort".
+      which shipped in 0005. `ErrorBoundary` catches a story returning `Err`; it
+      cannot catch a panic, because wasm here is panic="abort".
   [ ] MEASURE FIRST (carried from LOG-0004): Callback::new runs once per action
       prop PER RENDER inside wire_actions. Entries free only when StoryHost
       remounts. Bounded, but drag a slider and find out.
 
 READY TO RUN:
-  cargo test --workspace                      130 tests + 11 doctests, all green
+  cargo test --workspace                      150 tests + 13 doctests, all green
   rust-analyzer diagnostics .                 MUST stay clean — see standing facts
-  cd examples/button-gallery && dx serve --platform web    15 stories
+  cd examples/button-gallery && dx serve --platform web    15 stories, 2 globals
   cargo package -p dioxus-storybook-core      verifies the publish metadata
-  cd spikes/s4-iframe && dx serve --platform web           the M3 spike
+  cd spikes/s4-iframe && dx serve --platform web           the M3 iframe spike
 
 SMALL FOLLOW-UPS (unblocked, do any time):
   [ ] File upstream dx issue: `dx serve --hot-patch` fails on wasm with
@@ -69,6 +75,8 @@ SMALL FOLLOW-UPS (unblocked, do any time):
       it is same-origin and carries no sandbox attribute.
   [ ] The preview document has no `<title>` of its own. Harmless, but a framed
       document showing up in a11y trees as untitled is worth 5 minutes at M6.
+  [ ] docs/plan-artifact.html is the PUBLISHED version of docs/PLAN.md and is now
+      two sessions behind it.
 
 STILL OPEN (neither blocks the rest of M3):
   D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
@@ -89,19 +97,33 @@ DO NOT DO:
     #[non_exhaustive] for downstream crates but exhaustive inside core, so a new
     variant FAILS TO COMPILE until it is given a wire form. That is the only
     thing stopping a new message from silently going nowhere.
+  - Do not put a global's DEFAULT on the wire or in the URL. Only selections
+    travel; both halves fill in the declarations themselves, which they can
+    because the declarations are &'static and both halves share the bundle. It
+    is also what makes "the selection map is empty" mean "nothing is changed",
+    which is the question the reset button asks. LOG-0006 / G3.
+  - Do not compare a global (or an arg) straight out of a URL against a typed
+    ArgValue. The query-string codec is UNTYPED by design: `theme:dark` decodes
+    as Text, never Variant. Coerce first. LOG-0006 / G2.
+  - Do not invent a fourth value vocabulary. args change per story, parameters
+    are static per level, globals change for the whole book — and globals are
+    declared with the SAME `Control` a prop uses, which is what gives them a
+    widget, a URL encoding and a wire encoding for free. LOG-0006 / G1.
   - Do not make the iframe's `src` track live state. Changing `src` reloads the
     frame; it is computed once at mount and only the reload button touches it.
   - Do not let either half act on its own messages. InProcessChannel broadcasts
     to the emitter too; postMessage does not. tests/two_documents.rs holds the
     line — its harness deliberately has the stricter behaviour.
   - Do not let the MANAGER call StoryDef::base_args() or render a decorator.
-    Both need a live scope and a story, and the manager has neither. The preview
-    publishes defaults as Event::StoryPrepared. See LOG-0004 / F1.
+    Both need a live scope and a story, and the manager has neither. The manager
+    is given the Project for ONE reason: the list of globals the toolbar offers.
   - Do not render a story body inline in the preview again. Stories get their
     own scope via StoryHost, remounted per story. See LOG-0004 / F2.
   - Do not "simplify" the one-element `for def in [def]` loop around StoryHost
     into a plain child. Dioxus only honours `key` when diffing a LIST; a lone
-    keyed child is re-rendered in place and the hook bug comes back.
+    keyed child is re-rendered in place and the hook bug comes back. Note the
+    flip side: StoryHost is keyed on the STORY ID, so changing a global
+    re-renders it in place and a story's hook state survives. That is wanted.
   - Do not add a controls panel that mutates the preview's args signal directly.
     Route it through the Channel.
   - Do not emit a `macro_rules!` from one proc macro for another to call with a
@@ -153,6 +175,14 @@ DO NOT DO:
                                                merge + panic reporting.
                                                130 tests.
 
+0006  2026-09-06  M3 pt 2: globals & toolbar   Globals reuse the ARGS   log/0006-m3-globals-and-toolbar.md
+                                               machinery, not a fourth
+                                               vocabulary. URL, wire and
+                                               widget came free.
+                                               parameters.layout is the
+                                               first parameter anything
+                                               reads. 150 tests.
+
 
 --------------------------------------------------------------------------------
  STANDING FACTS  (things that cost time to learn — do not re-derive)
@@ -190,6 +220,21 @@ BROWSER / IFRAME  (session 0005)
     is not. A hook that captures NOTHING and looks `web_sys::window()` up afresh
     satisfies the bound. Chain the previous hook or you lose Dioxus's console
     output. The hook DOES run under `panic = "abort"` — then the module is gone.
+
+VALUE VOCABULARIES  (there are three, and there must not be a fourth)
+  * args      change at run time, scoped to ONE STORY, declared by the props type
+  * parameters are STATIC, scoped to a level (project/component/story), merged
+              innermost-wins by ResolvedParameters
+  * globals   change at run time, scoped to THE WHOLE BOOK, declared on Project
+  Globals are declared with the SAME `Control` enum a prop uses and carried in
+  an `ArgMap`, which is what gave them a widget, a URL encoding and a wire
+  encoding with no new code. Do not grow a fourth. (LOG-0006 / G1.)
+  * THE URL CODEC IS UNTYPED, BY DESIGN. `theme:dark` decodes as
+    ArgValue::Text, never Variant; `scale:2` as Num even for a String field.
+    Typing is restored on the way OUT — by the generated applier for args, by
+    `GlobalType::coerce` for globals. Anything that compares a value against a
+    typed ArgValue must coerce first, or it works when clicked and fails when
+    pasted. (LOG-0006 / G2.)
 
 RUST / DIOXUS GOTCHAS
   * `use_effect` DOES NOT RUN under a bare `VirtualDom`. `rebuild_in_place` and
@@ -278,10 +323,19 @@ TESTING TRAPS (all produced convincing WRONG answers)
   * macOS `sed -i ''` writes a sibling temp file (`.!PID!name.rs`). dx's file
     watcher latches onto THAT, not your file. Never use it to script an edit for
     a hot-reload measurement; write in place instead.
-  * A substring assertion can pass for the wrong reason. `story_bodies_are_
-    invoked_in_scope` asserted the shell contained "ok" — and "dioxus-storybook"
-    contains "ok". It kept passing after the story moved to another document.
-    Assert on a marker that could not appear by accident. (LOG-0005 / F7.)
+  * A substring assertion can pass for the wrong reason. TWICE NOW.
+      - `story_bodies_are_invoked_in_scope` asserted the shell contained "ok",
+        and "dioxus-storybook" contains "ok" (LOG-0005 / F7).
+      - Two toolbar tests asserted on "dxsb-globals", which the manager's
+        INLINED STYLESHEET names whether the toolbar rendered or not
+        (LOG-0006 / G4).
+    Assert on markup that cannot appear by accident: `class="dxsb-globals"`,
+    not `dxsb-globals`. Remember the manager document contains all of
+    MANAGER_CSS as text.
+  * A test whose premise is "this does not exist yet" can quietly become its
+    opposite. A wire test used the tag "globals" as an example of an UNKNOWN
+    tag; one session later `globals` was real. Name such placeholders so they
+    can never become valid — `no-such-tag-will-ever-exist`. (LOG-0006 / G5.)
 
 
 --------------------------------------------------------------------------------

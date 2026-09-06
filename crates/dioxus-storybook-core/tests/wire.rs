@@ -37,6 +37,7 @@ fn every_event_survives_the_round_trip() {
     round_trip(M, Event::UpdateArgs { id: id(), args: args() });
     round_trip(P, Event::RequestArgsUpdate { id: id(), args: args() });
     round_trip(P, Event::StoryPrepared { id: id(), initial_args: args() });
+    round_trip(M, Event::SetGlobals { globals: args() });
     round_trip(M, Event::ResetArgs { id: id() });
     round_trip(P, Event::StoryRendered { id: id() });
     round_trip(P, Event::StoryMissing { id: id() });
@@ -120,7 +121,11 @@ fn a_corrupt_length_prefix_is_rejected_rather_than_panicking() {
 #[test]
 fn an_unknown_tag_from_a_newer_peer_is_dropped_not_fatal() {
     // A stale cached iframe against a fresh manager, or the reverse.
-    assert_eq!(decode(P, "dxsb1|manager|globals|3:abc"), None);
+    //
+    // The tag here is deliberately one that will never be real. An earlier
+    // version of this test used "globals", which stopped being unknown one
+    // session later — a test whose subject can quietly become its opposite.
+    assert_eq!(decode(P, "dxsb1|manager|no-such-tag-will-ever-exist|3:abc"), None);
 }
 
 #[test]

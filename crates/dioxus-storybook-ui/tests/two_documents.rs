@@ -10,7 +10,8 @@ mod common;
 use common::Documents;
 use dioxus::prelude::*;
 use dioxus_storybook_core::{
-    ArgMap, ArgValue, Controllable, Decorator, Event, StoryContext, StoryDef, ViewMode,
+    ArgMap, ArgValue, Controllable, Decorator, Event, GlobalType, StoryContext, StoryDef,
+    ViewMode,
 };
 
 static PRIMARY: StoryDef = StoryDef::new("Forms/Button", "Primary", |_| {
@@ -326,4 +327,184 @@ fn project_decorators_wrap_stories_in_the_preview_and_not_in_the_shell() {
     // The shell renders no stories, so it must not be running story decorators
     // either — that would be the first crack in the split.
     assert!(!docs.manager_html().contains("project-shell"));
+}
+
+// ------------------------------------------------------------------ globals
+
+static GLOBALS: &[GlobalType] = &[
+    GlobalType::select("theme", &["light", "dark"]).with_title("Theme"),
+    GlobalType::toggle("rtl", false),
+];
+
+/// Reports the globals it was given, so what crossed the wire is visible in the
+/// preview's markup.
+static REPORTER: &[Decorator] = &[|ctx: &StoryContext, story: Element| {
+    let theme = ctx.globals().get("theme").map(ArgValue::as_text).unwrap_or_default();
+    let rtl = ctx.globals().get("rtl").map(ArgValue::as_text).unwrap_or_default();
+    rsx! { div { class: "theme-{theme} rtl-{rtl}", {story} } }
+}];
+
+fn with_globals() -> dioxus_storybook_core::Project {
+    dioxus_storybook_core::Project::new()
+        .with_globals(GLOBALS)
+        .with_decorators(REPORTER)
+}
+
+#[test]
+fn the_toolbar_appears_in_the_shell_and_the_defaults_reach_the_story() {
+    let docs = Documents::with_project(ALL, with_globals());
+
+    let manager = docs.manager_html();
+    // `class="..."`, not the bare class name: the manager inlines its whole
+    // stylesheet, which mentions every class it styles. A bare `contains` here
+    // passes whether the toolbar rendered or not.
+    assert!(manager.contains(r#"class="dxsb-globals""#), "no toolbar: {manager}");
+    assert!(manager.contains("Theme"), "the global's title is missing: {manager}");
+
+    // The declarations are `&'static` and both halves share the bundle, so each
+    // side fills in the defaults itself — nothing had to be sent for this.
+    assert!(
+        docs.preview_html().contains(r#"class="theme-light rtl-false""#),
+        "got: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn changing_a_global_reaches_the_story_in_the_other_document() {
+    let mut docs = Documents::with_project(ALL, with_globals());
+    says(
+        &mut docs,
+        ViewMode::Manager,
+        Event::SetGlobals {
+            globals: ArgMap::new()
+                .with("theme", ArgValue::Variant("dark".into()))
+                .with("rtl", ArgValue::Bool(true)),
+        },
+    );
+    assert!(
+        docs.preview_html().contains(r#"class="theme-dark rtl-true""#),
+        "got: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn a_global_outlives_the_story_it_was_set_on() {
+    // The whole reason globals are not args: flip the theme, then walk the
+    // sidebar looking for the component that forgot about it.
+    let mut docs = Documents::with_project(ALL, with_globals());
+    says(
+        &mut docs,
+        ViewMode::Manager,
+        Event::SetGlobals {
+            globals: ArgMap::new().with("theme", ArgValue::Variant("dark".into())),
+        },
+    );
+    select(&mut docs, "layout-card--default");
+
+    let preview = docs.preview_html();
+    assert!(preview.contains("card-body"), "the story did not change: {preview}");
+    assert!(preview.contains("theme-dark"), "the global did not survive: {preview}");
+}
+
+#[test]
+fn only_the_selections_travel_never_the_resolved_set() {
+    // Both halves read the same `&'static` declarations, so sending the defaults
+    // would only make every message longer and give the two sides a chance to
+    // disagree about what the defaults are.
+    let mut docs = Documents::with_project(ALL, with_globals());
+    docs.bus.traffic.borrow_mut().clear();
+    says(
+        &mut docs,
+        ViewMode::Manager,
+        Event::SetGlobals {
+            globals: ArgMap::new().with("theme", ArgValue::Variant("dark".into())),
+        },
+    );
+
+    let sent: Vec<_> = docs
+        .bus
+        .sent_by(ViewMode::Manager)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::SetGlobals { globals } => Some(globals),
+            _ => None,
+        })
+        .collect();
+    assert!(!sent.is_empty(), "nothing was sent");
+    for globals in sent {
+        assert!(
+            globals.get("rtl").is_none(),
+            "an untouched global rode along: {globals:?}"
+        );
+    }
+}
+
+#[test]
+fn the_shell_shows_no_toolbar_when_the_project_declares_no_globals() {
+    // An empty bar would be a row of nothing with a border around it.
+    //
+    // Matched as `class="..."` for the same reason as above — the stylesheet is
+    // inlined into this document and names the class regardless.
+    let docs = Documents::new(ALL);
+    assert!(!docs.manager_html().contains(r#"class="dxsb-globals""#));
+}
+
+// ------------------------------------------------------------------- layout
+
+static FULLSCREEN: StoryDef = StoryDef::new("Layout/Full", "Default", |_| {
+    rsx! { p { "full-body" } }
+})
+.with_parameters(dioxus_storybook_core::Parameters::from_static(&[(
+    "layout",
+    dioxus_storybook_core::ParamValue::Str("fullscreen"),
+)]));
+
+static TYPO: StoryDef = StoryDef::new("Layout/Typo", "Default", |_| rsx! { p { "typo-body" } })
+    .with_parameters(dioxus_storybook_core::Parameters::from_static(&[(
+        "layout",
+        dioxus_storybook_core::ParamValue::Str("fulscreen"),
+    )]));
+
+static LAYOUTS: &[&StoryDef] = &[&FULLSCREEN, &TYPO];
+
+#[test]
+fn a_story_can_ask_the_canvas_not_to_frame_it() {
+    let docs = Documents::new(LAYOUTS);
+    assert!(
+        docs.preview_html().contains(r#"class="dxsb-canvas layout-fullscreen""#),
+        "got: {}",
+        docs.preview_html()
+    );
+}
+
+#[test]
+fn a_layout_this_build_does_not_understand_still_renders() {
+    // Parameters are an open, stringly-typed space shared with addons that may
+    // not be in this build. A typo — or a value from a newer addon — must not
+    // be the difference between seeing a story and seeing nothing.
+    let mut docs = Documents::new(LAYOUTS);
+    select(&mut docs, "layout-typo--default");
+
+    let preview = docs.preview_html();
+    assert!(preview.contains("typo-body"), "got: {preview}");
+    assert!(preview.contains(r#"class="dxsb-canvas layout-centered""#), "got: {preview}");
+}
+
+#[test]
+fn the_shell_publishes_globals_even_with_no_story_selected() {
+    // A global is not about any one story, and an empty book still has a theme.
+    // This is also what makes the reset button honest: an empty selection map
+    // means "nothing has been changed", and it can only mean that if a default
+    // never gets written into it.
+    let docs = Documents::with_project(&[], with_globals());
+    assert!(
+        docs.bus
+            .sent_by(ViewMode::Manager)
+            .iter()
+            .any(|e| matches!(e, Event::SetGlobals { globals } if globals.is_empty())),
+        "traffic was: {:?}",
+        docs.bus.traffic.borrow()
+    );
 }

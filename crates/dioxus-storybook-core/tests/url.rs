@@ -11,6 +11,7 @@ fn round_trips_id_and_args() {
             .with("label", ArgValue::Text("Hey there".into()))
             .with("disabled", ArgValue::Bool(true))
             .with("scale", ArgValue::Num(1.5)),
+        globals: ArgMap::new(),
     };
     let query = state.to_query();
     assert_eq!(
@@ -102,4 +103,51 @@ fn malformed_input_degrades_instead_of_panicking() {
 #[test]
 fn an_empty_state_still_produces_a_usable_query() {
     assert_eq!(UrlState::default().to_query(), "?");
+}
+
+// ------------------------------------------------------------------ globals
+
+#[test]
+fn globals_ride_along_in_their_own_parameter() {
+    let state = UrlState {
+        id: Some("forms-button--primary".into()),
+        args: ArgMap::new().with("label", ArgValue::Text("Hey".into())),
+        globals: ArgMap::new()
+            .with("theme", ArgValue::Variant("dark".into()))
+            .with("rtl", ArgValue::Bool(true)),
+    };
+    assert_eq!(
+        state.to_query(),
+        "?id=forms-button--primary&args=label:Hey&globals=rtl:!true;theme:dark"
+    );
+}
+
+#[test]
+fn a_global_comes_back_from_a_link_untyped_like_every_other_value() {
+    // The URL codec is deliberately untyped: `theme:dark` cannot know it was a
+    // `Variant`. Typing is restored by `GlobalType::coerce`, the same way an
+    // arg's is restored by the generated applier. Asserting the *decoded* shape
+    // here rather than a round trip keeps that division honest.
+    let parsed = UrlState::parse("?globals=rtl:!true;theme:dark");
+    assert_eq!(parsed.globals.get("theme"), Some(&ArgValue::Text("dark".into())));
+    assert_eq!(parsed.globals.get("rtl"), Some(&ArgValue::Bool(true)));
+}
+
+#[test]
+fn a_link_with_globals_and_no_story_is_still_valid() {
+    let state = UrlState {
+        globals: ArgMap::new().with("theme", ArgValue::Text("dark".into())),
+        ..UrlState::default()
+    };
+    assert_eq!(state.to_query(), "?globals=theme:dark");
+    assert_eq!(UrlState::parse("?globals=theme:dark"), state);
+}
+
+#[test]
+fn a_link_from_before_globals_existed_still_parses() {
+    // Every URL this project has ever produced lacks the parameter, and the
+    // dev loop depends on old links continuing to land somewhere.
+    let parsed = UrlState::parse("?id=forms-button--primary&args=label:Hey");
+    assert!(parsed.globals.is_empty());
+    assert_eq!(parsed.id.as_deref(), Some("forms-button--primary"));
 }

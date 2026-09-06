@@ -41,6 +41,18 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-crumb .sep{color:#B8B7AF;margin:0 5px;font-weight:400}
 .dxsb-spacer{flex:1}
 .dxsb-id{font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88}
+/* --- globals toolbar --------------------------------------------------- */
+.dxsb-globals{display:flex;align-items:center;gap:12px;padding-right:12px;margin-right:4px;border-right:1px solid #E2E1DB}
+.dxsb-global{display:flex;align-items:center;gap:5px;font-size:12px;color:#4A5058;cursor:pointer}
+.dxsb-global-title{font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88;text-transform:uppercase;letter-spacing:.04em}
+.dxsb-globals-input{padding:2px 5px;border:1px solid #CFCEC7;border-radius:5px;font:inherit;font-size:12px;background:#fff;color:#17191C}
+.dxsb-globals-input:focus{outline:2px solid #C4451B;outline-offset:-1px;border-color:#C4451B}
+.dxsb-globals-input.narrow{width:5.5em}
+.dxsb-globals-range{width:90px;accent-color:#C4451B}
+.dxsb-globals-reset{background:none;border:0;color:#787F88;font-size:13px;line-height:1;padding:3px 5px;border-radius:4px;cursor:pointer}
+.dxsb-globals-reset:hover:not(:disabled){background:#E7E6E1;color:#C4451B}
+.dxsb-globals-reset:disabled{opacity:.3;cursor:default}
+
 .dxsb-tagrow{display:flex;gap:5px}
 .dxsb-tag{font:10px ui-monospace,monospace;color:#4A5058;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:3px;padding:0 5px}
 
@@ -116,6 +128,9 @@ body{font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;color:#17191
    that has one, and the canvas sits inside whatever element the host app
    mounted into. The frame's viewport is the one height always known. */
 .dxsb-canvas{min-height:100vh;display:grid;place-items:center;padding:40px;overflow:auto}
+/* `parameters.layout`, the one decision a story makes about its surface. */
+.dxsb-canvas.layout-padded{place-items:start center}
+.dxsb-canvas.layout-fullscreen{padding:0;place-items:stretch}
 .dxsb-blank{color:#787F88;font-size:13px;text-align:center;max-width:44ch;line-height:1.6}
 .dxsb-blank code{font:12px ui-monospace,monospace;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:4px;padding:1px 5px}
 "#;

@@ -9,8 +9,11 @@
 //! # Format
 //!
 //! ```text
-//! ?id=forms-button--primary&args=label:Hey;disabled:!true;scale:1.5
+//! ?id=forms-button--primary&args=label:Hey;disabled:!true&globals=theme:dark
 //! ```
+//!
+//! `args` are per-story overrides; `globals` are the toolbar's, and outlive the
+//! story you were looking at when you set them. Both use the same encoding.
 //!
 //! Values are percent-encoded, with three literals reserved: `!true`, `!false`
 //! and `!null`, and one prefix: `!,` opens a comma-separated list. Everything
@@ -35,6 +38,12 @@ pub struct UrlState {
     pub id: Option<String>,
     /// Arg overrides layered on top of the story's defaults.
     pub args: ArgMap,
+    /// Toolbar globals that have been moved off their declared defaults.
+    ///
+    /// Only the selections travel, not the resolved set: the declarations are
+    /// `&'static` and both halves of the app read them directly, so putting the
+    /// defaults in the link would only make it longer and stale.
+    pub globals: ArgMap,
 }
 
 impl UrlState {
@@ -59,6 +68,7 @@ impl UrlState {
                     }
                 }
                 "args" => state.args = decode_args(value),
+                "globals" => state.globals = decode_args(value),
                 _ => {}
             }
         }
@@ -76,6 +86,9 @@ impl UrlState {
         }
         if !self.args.is_empty() {
             parts.push(format!("args={}", encode_args(&self.args)));
+        }
+        if !self.globals.is_empty() {
+            parts.push(format!("globals={}", encode_args(&self.globals)));
         }
         format!("?{}", parts.join("&"))
     }

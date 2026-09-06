@@ -335,9 +335,17 @@ types. S2 killed both automatic-registration options. Details in
 Split manager/preview into two documents + `postMessage` `Channel` impl (no addon changes) · decorators at 3 levels · parameters with merge semantics · globals + toolbar · viewport, backgrounds, measure, outline addons · error boundary reporting panics to the manager.
 > **Delivers:** robustness + environment testing. Unblocks everything downstream.
 >
-> **Done (session 0005):** the split, decorators, parameter merging, and panic
-> reporting. **Not done:** globals + toolbar, the four environment addons, and an
-> `ErrorBoundary` for `Element`-level errors.
+> **Done (sessions 0005–0006):** the split, decorators, parameter merging, panic
+> reporting, globals + toolbar, and `parameters.layout`. **Not done:** the four
+> environment addons, and an `ErrorBoundary` for `Element`-level errors.
+>
+> A second correction to the scope: globals needed **no new value vocabulary**.
+> A `GlobalType` declares the same `Control` a prop's `ArgType` does and the
+> values live in an `ArgMap`, so globals inherited a widget, a URL encoding and
+> a wire encoding without new code in any of the three. The cost of that reuse
+> is one real trap — the URL codec is untyped, so a global from a link needs a
+> declared-shape pass (`GlobalType::coerce`) before anything compares it. See
+> LOG-0006.
 >
 > One correction to the scope above, and it is worth reading before touching
 > this milestone again. "**Two wasm bundles**" was the wrong shape. The manager

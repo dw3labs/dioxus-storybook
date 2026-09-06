@@ -26,7 +26,7 @@
 
 use dioxus_core::Element;
 
-use crate::{ArgMap, ArgType};
+use crate::{ArgMap, ArgType, GlobalType};
 
 /// A `const`-constructible parameter value.
 ///
@@ -211,6 +211,7 @@ pub struct StoryContext {
     name: &'static str,
     args: ArgMap,
     parameters: ResolvedParameters,
+    globals: ArgMap,
 }
 
 impl StoryContext {
@@ -238,6 +239,21 @@ impl StoryContext {
     pub const fn parameters(&self) -> ResolvedParameters {
         self.parameters
     }
+
+    /// The toolbar globals, resolved against their declared defaults.
+    ///
+    /// Total over everything [`Project::globals`] declares, so a decorator
+    /// reading one never has to handle "the toolbar has not been touched yet".
+    ///
+    /// ```ignore
+    /// fn themed(ctx: &StoryContext, story: Element) -> Element {
+    ///     let dark = ctx.globals().get("theme") == Some(&ArgValue::Variant("dark".into()));
+    ///     rsx! { div { class: if dark { "dark" } else { "light" }, {story} } }
+    /// }
+    /// ```
+    pub const fn globals(&self) -> &ArgMap {
+        &self.globals
+    }
 }
 
 /// Configuration that applies to every story in the book.
@@ -256,6 +272,7 @@ impl StoryContext {
 pub struct Project {
     decorators: &'static [Decorator],
     parameters: Parameters,
+    globals: &'static [GlobalType],
 }
 
 impl Project {
@@ -264,6 +281,7 @@ impl Project {
         Self {
             decorators: &[],
             parameters: Parameters::new(),
+            globals: &[],
         }
     }
 
@@ -281,9 +299,28 @@ impl Project {
         self
     }
 
+    /// The globals the toolbar offers, and every story sees.
+    #[must_use]
+    pub const fn with_globals(mut self, globals: &'static [GlobalType]) -> Self {
+        self.globals = globals;
+        self
+    }
+
     /// The project-level decorators.
     pub const fn decorators(&self) -> &'static [Decorator] {
         self.decorators
+    }
+
+    /// The declared globals.
+    pub const fn globals(&self) -> &'static [GlobalType] {
+        self.globals
+    }
+
+    /// Fill in every declared global that `selected` does not set.
+    ///
+    /// See [`globals::resolve`](crate::globals::resolve).
+    pub fn resolved_globals(&self, selected: &ArgMap) -> ArgMap {
+        crate::globals::resolve(self.globals, selected)
     }
 
     /// The project-level parameters.
@@ -528,13 +565,18 @@ impl StoryDef {
     }
 
     /// What a decorator is told about this story.
-    pub fn context(&self, project: Project, args: &ArgMap) -> StoryContext {
+    ///
+    /// `globals` is the *selected* set; the declared defaults are filled in
+    /// here, so a caller may pass an empty map and a decorator still sees every
+    /// global the project declares.
+    pub fn context(&self, project: Project, args: &ArgMap, globals: &ArgMap) -> StoryContext {
         StoryContext {
             id: self.id(),
             title: self.title,
             name: self.name,
             args: args.clone(),
             parameters: self.resolved_parameters(project),
+            globals: project.resolved_globals(globals),
         }
     }
 
@@ -546,13 +588,18 @@ impl StoryDef {
     ///
     /// Must be called from inside a Dioxus scope: a decorator may use `rsx!`,
     /// and so may the story.
-    pub fn render_decorated(&self, project: Project, args: &ArgMap) -> Element {
+    pub fn render_decorated(
+        &self,
+        project: Project,
+        args: &ArgMap,
+        globals: &ArgMap,
+    ) -> Element {
         let chain = self
             .decorators
             .iter()
             .chain(self.meta.decorators())
             .chain(project.decorators());
-        let context = self.context(project, args);
+        let context = self.context(project, args, globals);
         let mut element = self.render(args);
         for decorate in chain {
             element = decorate(&context, element);
