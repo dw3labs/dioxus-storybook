@@ -38,8 +38,11 @@ DONE IN M3 (all six)
       LIST = a Project declaration, CHOICE = a parameter, SELECTION = a global.
 
 NEXT UP — pick one, and read LOG-0007's "notes for the next session" first
-  [ ] START M4 (docs / autodocs) if the milestone order stands. Check
-      docs/PLAN.md — it is what M4 means, and it has not been reread since 0002.
+  [ ] START M4 (docs / autodocs) if the milestone order stands. docs/PLAN.md
+      is what M4 means; its milestone table was brought current in 0007, so it
+      can be trusted about scope. NOTE what M3 shed on the way out — backgrounds,
+      measure, outline and the ErrorBoundary are recorded there as carried, not
+      delivered. Decide whether any of them belongs before M4 rather than after.
   [ ] backgrounds addon. DECIDE FIRST whether it is a built-in or just the
       documented decorator pattern; the example's theme decorator already does
       the job by hand and the two would overlap. Do not write both.

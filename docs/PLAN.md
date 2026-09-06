@@ -1,6 +1,6 @@
 # Dioxus Storybook — Research & Project Plan
 
-> Status: M0 + M1 complete · Date: 2026-09-06 · Target: Dioxus 0.7.10
+> Status: M0–M3 complete · Date: 2026-09-06 · Target: Dioxus 0.7.10
 > Shipping as **`dioxus-storybook`**, MIT, © DW3Labs — a publishable crate (D1b).
 >
 > **Superseding results live in `docs/M0-FINDINGS.md` and `log/0002-m0-spikes.md`.**
@@ -331,13 +331,34 @@ types. S2 killed both automatic-registration options. Details in
 > comma-separated text — a real list widget is a later, non-breaking addition.
 > See LOG-0004.
 
-### M3 · Isolation, globals & environment (~2–3 weeks) — 🚧 **IN PROGRESS**
+### M3 · Isolation, globals & environment (~2–3 weeks) — ✅ **COMPLETE** (scope trimmed)
 Split manager/preview into two documents + `postMessage` `Channel` impl (no addon changes) · decorators at 3 levels · parameters with merge semantics · globals + toolbar · viewport, backgrounds, measure, outline addons · error boundary reporting panics to the manager.
 > **Delivers:** robustness + environment testing. Unblocks everything downstream.
 >
-> **Done (sessions 0005–0006):** the split, decorators, parameter merging, panic
-> reporting, globals + toolbar, and `parameters.layout`. **Not done:** the four
-> environment addons, and an `ErrorBoundary` for `Element`-level errors.
+> **Shipped:** the split, decorators, parameter merging, panic reporting,
+> globals + toolbar, `parameters.layout`, and the **viewport addon**.
+> 152 tests + 19 doctests.
+>
+> **Deliberately carried out of the milestone, not delivered:**
+> - **backgrounds.** Overlaps what a project decorator already does by hand —
+>   the example paints its own theme that way. Decide whether it is a built-in
+>   or the documented decorator pattern *before* writing it; do not write both.
+> - **measure / outline.** Preview-side overlays driven by a global toggle.
+>   These are a different shape from viewport: they must put something *inside*
+>   the frame, so they share no machinery with what shipped.
+> - **`ErrorBoundary`** for a story returning `Err`. Distinct from the panic
+>   hook, which cannot catch it — wasm here is `panic = "abort"`.
+>
+> The viewport addon is the reason the rest were droppable rather than blocking:
+> it proved the pattern the others would follow. It also cost almost nothing,
+> because the frame's width belongs to the shell — "render this story at 360px"
+> is a style attribute and nothing on the wire, and the story's own media
+> queries fire because it genuinely is that size. Its three parts landed on
+> mechanisms that already existed: the **list** of sizes is a declaration on the
+> `Project`, the size a story **opens at** is a parameter, and the **selection**
+> is a global. The list could *not* be a parameter — `ParamValue` is
+> `Str | Num | Bool` and a viewport is a record — and widening it would have
+> been the fourth value vocabulary. See LOG-0007.
 >
 > A second correction to the scope: globals needed **no new value vocabulary**.
 > A `GlobalType` declares the same `Control` a prop's `ArgType` does and the
@@ -372,7 +393,7 @@ Autodocs page per component · props table from `ArgType` + doc comments · stor
 
 ### M6 · Testing (~4–6 weeks)
 `dx-story-testing` DOM queries + user-event · `#[play]` execution + Interactions panel with step log · a11y addon (load axe-core in preview, pipe results over channel, highlight violations) · `dx-story test` headless runner over the static build (render smoke tests + play functions) · visual-regression snapshot + pixel diff.
-> **Note:** a11y is disproportionately cheap (axe-core is a JS drop-in) and disproportionately valuable — consider pulling it forward into M3.
+> **Note:** a11y is disproportionately cheap (axe-core is a JS drop-in) and disproportionately valuable — consider pulling it forward. M3 has closed, so the earliest slot is now alongside M4.
 
 ### M7 · Extensibility (ongoing)
 Public addon trait (manager half + preview half + channel messages) · presets · UI theming · story composition/refs.

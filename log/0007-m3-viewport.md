@@ -163,6 +163,8 @@ crates/dioxus-storybook/src/lib.rs                the "Viewports" section
 examples/button-gallery/src/nav.rs                NEW  a responsive component
 examples/button-gallery/src/stories/nav.rs        NEW  Wide + On A Phone
 examples/button-gallery/src/main.rs               mod nav
+CLAUDE.md, log/index.log, docs/PLAN.md            M3 marked complete, with the
+                                                  carried items named in each
 ```
 
 ## Verified
@@ -185,7 +187,13 @@ examples/button-gallery/src/main.rs               mod nav
 
 ## Notes for the next session
 
-M3 is complete. The remaining M3-adjacent items were **deliberately not** done:
+M3 is complete, with its scope trimmed on the way out. `docs/PLAN.md` now says
+so in the milestone table, and names what was carried rather than delivered —
+the same three addons and the `ErrorBoundary` listed below. They were droppable
+rather than blocking *because* viewport shipped: it proved the pattern the
+others would follow.
+
+The items **deliberately not** done:
 
 - **backgrounds** — decide first whether it is a built-in addon or just the
   documented decorator pattern. The example's theme decorator already does the
