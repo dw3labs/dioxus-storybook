@@ -12,9 +12,16 @@ use syn::{Data, DeriveInput, Fields, Type};
 
 use crate::core_path;
 
-/// Collect the text of `///` doc comments on a field or item.
-fn docs_of(attrs: &[syn::Attribute]) -> String {
-    let mut out = Vec::new();
+/// The **summary paragraph** of the `///` doc comments on a field or item.
+///
+/// Lines up to the first blank one, joined. That is rustdoc's own rule for the
+/// short description it puts in an item listing, and it is the right rule here
+/// for the same reason: a docs page shows one blurb per story next to the
+/// example, and a doc comment whose second paragraph explains an implementation
+/// detail should not push the next example off the screen. The full text is
+/// still what `cargo doc` renders — this only decides what the storybook quotes.
+pub(crate) fn docs_of(attrs: &[syn::Attribute]) -> String {
+    let mut out: Vec<String> = Vec::new();
     for attr in attrs {
         if !attr.path().is_ident("doc") {
             continue;
@@ -25,7 +32,17 @@ fn docs_of(attrs: &[syn::Attribute]) -> String {
                 ..
             }) = &nv.value
         {
-            out.push(s.value().trim().to_string());
+            let line = s.value().trim().to_string();
+            // A blank line ends the summary — but only once something has been
+            // collected, so a leading `///` on its own is skipped rather than
+            // ending the paragraph before it starts.
+            if line.is_empty() {
+                if out.is_empty() {
+                    continue;
+                }
+                break;
+            }
+            out.push(line);
         }
     }
     out.join(" ").trim().to_string()
@@ -170,6 +187,10 @@ fn is_dynamic(ty: &Type, ov: Option<&Override>) -> bool {
 pub fn derive_controls(ast: DeriveInput) -> TokenStream {
     let core = core_path();
     let name = &ast.ident;
+    // The props type's own `///`. The docs page falls back to it when
+    // `story_meta!` gave no description, which is what makes a component
+    // documented without anyone writing storybook-specific prose.
+    let type_docs = docs_of(&ast.attrs);
 
     let Data::Struct(ds) = &ast.data else {
         return syn::Error::new_spanned(&ast.ident, "Controls can only be derived for structs")
@@ -291,6 +312,8 @@ pub fn derive_controls(ast: DeriveInput) -> TokenStream {
 
     quote! {
         impl #core::Controllable for #name {
+            const DOCS: &'static str = #type_docs;
+
             fn arg_types() -> &'static [#core::ArgType] {
                 // A `const`: the whole props table is materialised at compile
                 // time, so reading it at runtime costs nothing.

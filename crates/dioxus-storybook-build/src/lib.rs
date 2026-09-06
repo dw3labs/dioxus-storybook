@@ -1,4 +1,4 @@
-//! Build-script story indexer for [`dioxus-storybook`].
+//! Build-script story indexer for [dioxus-storybook].
 //!
 //! # Why a build script at all
 //!

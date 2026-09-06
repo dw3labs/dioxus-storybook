@@ -36,13 +36,17 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-hint kbd{font:10px ui-monospace,monospace;background:#E7E6E1;border:1px solid #D7D6D0;border-bottom-width:2px;border-radius:3px;padding:0 4px}
 
 .dxsb-main{display:flex;flex-direction:column;min-width:0;min-height:0}
-.dxsb-toolbar{display:flex;align-items:center;gap:10px;padding:9px 18px;border-bottom:1px solid #E2E1DB;background:#fff;flex-shrink:0}
-.dxsb-crumb{font-weight:600}
+/* Three columns: crumb | id | tools. `1fr auto 1fr` puts the id at the exact
+   centre of the bar whatever sits either side of it, and pins the tools to the
+   right edge — which is what keeps the Canvas/Docs toggle still while the
+   viewport picker beside it appears and disappears. */
+.dxsb-toolbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:9px 18px;border-bottom:1px solid #E2E1DB;background:#fff;flex-shrink:0}
+.dxsb-crumb{font-weight:600;justify-self:start;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dxsb-crumb .sep{color:#B8B7AF;margin:0 5px;font-weight:400}
-.dxsb-spacer{flex:1}
-.dxsb-id{font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88}
+.dxsb-tools{display:flex;align-items:center;gap:10px;justify-self:end;min-width:0}
+.dxsb-id{justify-self:center;font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88;white-space:nowrap}
 /* --- globals toolbar --------------------------------------------------- */
-.dxsb-globals{display:flex;align-items:center;gap:12px;padding-right:12px;margin-right:4px;border-right:1px solid #E2E1DB}
+.dxsb-globals{display:flex;align-items:center;gap:12px;padding-right:12px;border-right:1px solid #E2E1DB}
 .dxsb-global{display:flex;align-items:center;gap:5px;font-size:12px;color:#4A5058;cursor:pointer}
 .dxsb-global-title{font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88;text-transform:uppercase;letter-spacing:.04em}
 .dxsb-globals-input{padding:2px 5px;border:1px solid #CFCEC7;border-radius:5px;font:inherit;font-size:12px;background:#fff;color:#17191C}
@@ -53,8 +57,14 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-globals-reset:hover:not(:disabled){background:#E7E6E1;color:#C4451B}
 .dxsb-globals-reset:disabled{opacity:.3;cursor:default}
 
+/* --- canvas / docs toggle ---------------------------------------------- */
+.dxsb-docstoggle{display:flex;align-items:center;gap:2px;padding:2px;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:6px;flex-shrink:0}
+.dxsb-docstab{background:none;border:0;border-radius:4px;padding:3px 10px;font:inherit;font-size:12px;color:#787F88;cursor:pointer}
+.dxsb-docstab:hover{color:#17191C}
+.dxsb-docstab.active{background:#fff;color:#17191C;font-weight:600;box-shadow:0 1px 2px rgba(23,25,28,.08)}
+
 /* --- viewport picker --------------------------------------------------- */
-.dxsb-viewport{display:flex;align-items:center;gap:8px;padding-right:12px;margin-right:4px;border-right:1px solid #E2E1DB}
+.dxsb-viewport{display:flex;align-items:center;gap:8px;padding-right:12px;border-right:1px solid #E2E1DB}
 .dxsb-viewport-rotate{background:none;border:0;color:#787F88;font-size:13px;line-height:1;padding:3px 5px;border-radius:4px;cursor:pointer}
 .dxsb-viewport-rotate:hover:not(:disabled){background:#E7E6E1;color:#C4451B}
 .dxsb-viewport-rotate:disabled{opacity:.3;cursor:default}
@@ -106,6 +116,8 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-propname{font:500 13px ui-monospace,SFMono-Regular,monospace}
 .dxsb-optional{color:#B8B7AF;font:12px ui-monospace,monospace}
 .dxsb-propdocs{display:block;color:#787F88;font-size:11.5px;line-height:1.45;margin-top:2px}
+/* `code` inside a quoted doc comment. See `inline.rs`. */
+.dxsb-doccode{font:.92em ui-monospace,SFMono-Regular,monospace;background:#F2F2EF;border-radius:3px;padding:0 3px}
 .dxsb-ctrlwidget{width:36%}
 .dxsb-ctrltype code{font:11px ui-monospace,monospace;color:#787F88;word-break:break-all}
 .dxsb-ctrlreset{width:44px;text-align:right}
@@ -147,4 +159,51 @@ body{font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;color:#17191
 .dxsb-canvas.layout-fullscreen{padding:0;place-items:stretch}
 .dxsb-blank{color:#787F88;font-size:13px;text-align:center;max-width:44ch;line-height:1.6}
 .dxsb-blank code{font:12px ui-monospace,monospace;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:4px;padding:1px 5px}
+
+/* --- the autodocs page -------------------------------------------------
+   A document, not a canvas: it scrolls, it has a reading measure, and it is
+   the one thing in the preview that is chrome rather than component. It lives
+   here rather than in the manager's stylesheet because it renders in the
+   frame — which it must, since every example on it is a real story with its
+   own decorators. */
+.dxsb-docs{max-width:920px;margin:0 auto;padding:44px 32px 96px;color:#17191C}
+.dxsb-docs-head{border-bottom:1px solid #E2E1DB;padding-bottom:22px;margin-bottom:8px}
+.dxsb-docs-path{margin:0;font:11px ui-monospace,SFMono-Regular,monospace;letter-spacing:.08em;text-transform:uppercase;color:#9A9A93}
+.dxsb-docs-title{margin:6px 0 0;font-size:30px;line-height:1.15;letter-spacing:-.01em}
+.dxsb-docs-lede{margin:12px 0 0;font-size:15px;line-height:1.65;color:#4A5058;max-width:68ch}
+.dxsb-docs-note{margin:24px 0 0;font-size:13px;color:#787F88;line-height:1.6}
+.dxsb-docs-note code{font:12px ui-monospace,monospace;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:4px;padding:1px 5px}
+.dxsb-docs-h2{font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:#9A9A93;margin:40px 0 12px}
+.dxsb-docs-h3{font-size:17px;margin:0 0 4px;letter-spacing:-.005em}
+.dxsb-docs-blurb{margin:0 0 14px;font-size:13.5px;line-height:1.6;color:#4A5058;max-width:68ch}
+
+/* The props table. Deliberately not `.dxsb-controls`: that one is a panel of
+   editable widgets in a 38%-tall drawer, and this is a reference table on a
+   page. Same data, different job. */
+.dxsb-proptable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.dxsb-proptable th{text-align:left;font:600 10px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#9A9A93;padding:7px 12px;border-bottom:1px solid #E2E1DB}
+.dxsb-proptable th:nth-child(1){width:20%}
+.dxsb-proptable th:nth-child(2){width:26%}
+.dxsb-proptable th:nth-child(3){width:18%}
+.dxsb-proptable td{padding:9px 12px;border-bottom:1px solid #F0EFEA;vertical-align:top;line-height:1.5}
+.dxsb-propname{font:500 13px ui-monospace,SFMono-Regular,monospace}
+.dxsb-optional{color:#B8B7AF;font:12px ui-monospace,monospace}
+.dxsb-proptype,.dxsb-propdefault{font:11.5px ui-monospace,SFMono-Regular,monospace;color:#787F88;word-break:break-word}
+.dxsb-propdefault{color:#C4451B}
+.dxsb-propcell-docs{color:#4A5058;font-size:12.5px}
+.dxsb-doccode{font:.92em ui-monospace,SFMono-Regular,monospace;background:#F2F2EF;border-radius:3px;padding:0 3px}
+.dxsb-muted{color:#B8B7AF;font-size:12px}
+
+/* Each story: the live example above, the code that made it below. */
+.dxsb-docs-story{margin:0 0 40px}
+.dxsb-docs-example{border:1px solid #E2E1DB;border-radius:7px;background:#fff;padding:28px;display:flex;justify-content:center;align-items:center;min-height:96px;overflow:auto}
+.dxsb-docs-source{margin-top:8px}
+.dxsb-docs-source summary{font-size:11.5px;color:#787F88;cursor:pointer;padding:4px 2px;list-style:none;user-select:none}
+.dxsb-docs-source summary::-webkit-details-marker{display:none}
+.dxsb-docs-source summary::before{content:"\25B8 ";color:#B8B7AF}
+.dxsb-docs-source[open] summary::before{content:"\25BE "}
+.dxsb-docs-source summary:hover{color:#C4451B}
+.dxsb-docs-source pre{margin:4px 0 0;background:#17191C;color:#EDEDEA;border-radius:7px;padding:16px 18px;overflow-x:auto}
+.dxsb-docs-source code{font:12px/1.6 ui-monospace,SFMono-Regular,monospace;white-space:pre}
+.dxsb-docs-id{margin:8px 0 0;font:10.5px ui-monospace,SFMono-Regular,monospace;color:#C9C8C1}
 "#;

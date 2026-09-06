@@ -103,7 +103,7 @@ fn render_with_globals(
         args: ArgMap,
         globals: ArgMap,
     ) -> Element {
-        def.render_decorated(project, &args, &globals)
+        def.render_decorated(project, &args, &globals, StoryView::Canvas)
     }
     let mut dom =
         VirtualDom::new_with_props(Harness, HarnessProps { def, project, args, globals });
@@ -277,7 +277,7 @@ mod authored {
     fn render(def: &'static dioxus_storybook::StoryDef) -> String {
         #[component]
         fn Harness(def: &'static dioxus_storybook::StoryDef) -> Element {
-            def.render_decorated(Project::new(), &ArgMap::new(), &ArgMap::new())
+            def.render_decorated(Project::new(), &ArgMap::new(), &ArgMap::new(), StoryView::Canvas)
         }
         let mut dom = VirtualDom::new_with_props(Harness, HarnessProps { def });
         dom.rebuild_in_place();

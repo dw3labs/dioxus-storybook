@@ -17,6 +17,9 @@ use crate::nav::{Navbar, NavbarProps};
 story_meta! {
     title: "Layout/Navbar",
     component: Navbar,
+    description: "A site header that collapses below 640px. Its docs page is a \
+                  responsive canvas whatever the viewport picker says — the \
+                  examples are laid out for reading, not for measuring.",
 }
 
 fn base() -> NavbarProps {

@@ -68,10 +68,10 @@
 //!
 //! # Status
 //!
-//! M3 in progress — isolation. Browse and render stories, edit every prop live
-//! from a panel generated out of the props type, watch the component call its
-//! own event handlers, share the result as a URL, and render every story in a
-//! document of its own.
+//! M4 — docs. Browse and render stories, edit every prop live from a panel
+//! generated out of the props type, watch the component call its own event
+//! handlers, share the result as a URL, render every story in a document of its
+//! own, and read a generated documentation page per component.
 //!
 //! # The one thing to know about M3
 //!
@@ -157,6 +157,65 @@
 //! next to the theme, and a decorator can read it with
 //! [`StoryContext::viewport`](prelude::StoryContext::viewport).
 //!
+//! # Autodocs
+//!
+//! Every component gets a documentation page, and nothing has to be written for
+//! it. Reach one from the **Canvas / Docs** toggle in the toolbar, or by its id:
+//! `?id=forms-button--docs` sits in the same id space as
+//! `?id=forms-button--primary`, so it is an ordinary link.
+//!
+//! The page is assembled from things the compiler already knows:
+//!
+//! | | where it comes from |
+//! |---|---|
+//! | the component's name | `story_meta! { component: .. }` |
+//! | the description | `story_meta! { description: ".." }`, else the `///` on the props type |
+//! | the props table | `#[derive(Controls)]` — names, types, `///`, and each story's evaluated defaults |
+//! | each story's blurb | the `#[story]` function's own `///` |
+//! | each story's source | the `#[story]` function's body, **as written** |
+//!
+//! That last one is source *text*, not a re-rendering of the token stream: the
+//! macro reads the span's source, so the snippet on the page keeps your line
+//! breaks, your indentation and your comments.
+//!
+//! ```ignore
+//! story_meta! {
+//!     title: "Forms/Button",
+//!     component: Button,
+//!     description: "The primary action. Four variants and a size multiplier.",
+//! }
+//!
+//! /// The default. Use one per view, for the action you want taken.
+//! #[story]
+//! fn primary() -> ButtonProps { base() }
+//! ```
+//!
+//! Docs pages are on for every component. For Storybook's own rule — opt in per
+//! component with a tag — or to turn them off altogether:
+//!
+//! ```ignore
+//! static PROJECT: Project = Project::new().with_autodocs(Autodocs::Tagged);
+//! // then: story_meta! { title: .., component: .., tags: ["autodocs"] }
+//! ```
+//!
+//! ## The one thing that can surprise you
+//!
+//! A docs page renders **in the preview document**, and every example on it is a
+//! real story with its own decorators — that is what makes the examples true.
+//! But the canvas holds one story and a docs page holds a dozen, so a decorator
+//! that paints the whole surface has to know which it is on:
+//!
+//! ```ignore
+//! fn themed(ctx: &StoryContext, story: Element) -> Element {
+//!     // 100vh is exactly the frame on the canvas, and a screen per example on a docs page.
+//!     let fill = match ctx.view() {
+//!         StoryView::Docs => "min-height:0",
+//!         _ => "min-height:100vh",
+//!     };
+//!     rsx! { div { style: "{fill};background:#111", {story} } }
+//! }
+//! ```
+//!
 //! # `parameters.layout`
 //!
 //! One parameter is read by the canvas itself: `layout` is `"centered"` (the
@@ -181,10 +240,14 @@
 //!   your types.
 //! - **The controls panel never touches the preview.** It edits the manager's
 //!   arg set, which goes out on the channel; a story writes back the same way,
-//!   with [`use_args`](prelude::use_args).
+//!   with [`prelude::use_args`].
 //! - **The registry is generated at build time,** because `linkme` does not
 //!   compile for wasm and `inventory` silently drops stories at
 //!   `codegen-units > 1`.
+//! - **A docs page is an id, not a mode.** It resolves out of the same registry
+//!   the sidebar reads, travels in the same `?id=` parameter and the same wire
+//!   message, and renders in the same iframe — so autodocs needed no new URL
+//!   parameter, no new event and no second transport.
 //! - **The URL is load-bearing.** `dx serve` cannot hot-patch on wasm, so a
 //!   source edit reloads the page and destroys every signal; the query string
 //!   is what brings you back to where you were.
@@ -209,10 +272,10 @@ pub mod prelude {
     pub use dioxus::prelude::*;
 
     pub use dioxus_storybook_core::{
-        ActionSink, ArgMap, ArgType, ArgValue, ArgsHandle, Control,
-        ControlEnum as ControlEnumTrait, Controllable, Decorator, FromArg, GlobalType, Meta,
-        ParamValue, Parameters, Project, Registry, ResolvedParameters, StoryContext, StoryDef,
-        ToArg, use_args,
+        ActionSink, ArgMap, ArgType, ArgValue, ArgsHandle, Autodocs, Control,
+        ControlEnum as ControlEnumTrait, Controllable, Decorator, DocsPage, FromArg, GlobalType,
+        Meta, ParamValue, Parameters, Project, Registry, ResolvedParameters, StoryContext,
+        StoryDef, StoryView, ToArg, use_args,
     };
     pub use dioxus_storybook_macro::{ControlEnum, Controls, story, story_meta};
     pub use dioxus_storybook_ui::Storybook;

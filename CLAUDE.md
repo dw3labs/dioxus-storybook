@@ -5,9 +5,10 @@ workbench where each component's states are declared as *stories*, rendered in
 isolation, driven by controls auto-generated from the props type, and later
 doubling as tests and documentation.
 
-**Status:** M0 (spikes), M1 (walking skeleton), M2 (controls & actions) and M3
-(isolation, globals, environment) complete — the iframe split, decorators,
-parameters, panic reporting, globals/toolbar and the viewport addon. M4 next.
+**Status:** M0 (spikes), M1 (walking skeleton), M2 (controls & actions), M3
+(isolation, globals, environment) and M4 (docs) complete — the iframe split,
+decorators, parameters, panic reporting, globals/toolbar, the viewport addon,
+and a generated documentation page per component. M5 next.
 **Scope:** a publishable open-source crate — semver + docs discipline apply.
 **Name:** `dioxus-storybook` · MIT · © DW3Labs.
 **Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
@@ -57,6 +58,7 @@ log/
   0005-m3-isolation.md
   0006-m3-globals-and-toolbar.md
   0007-m3-viewport.md
+  0008-m4-autodocs.md
 docs/
   PLAN.md                  the working plan: features, problems, milestones
   M0-FINDINGS.md           full spike write-up
@@ -83,11 +85,15 @@ Cargo.toml                 workspace (edition 2024)
 # Run the storybook. This is the main loop.
 cd examples/button-gallery && dx serve --platform web
 
-# The whole suite: 152 tests + 19 doctests. Everything must stay green.
+# The whole suite: 202 tests + doctests. Everything must stay green.
 cargo test --workspace
 
 # Definition of done for anything macro-facing. Must be clean.
 rust-analyzer diagnostics .
+
+# Also definition of done, since M4: docs.rs would fail on a broken link, and
+# nothing else in the loop runs rustdoc. It was already red at M4's start.
+cargo doc --no-deps --workspace
 
 # Check the publish metadata still holds
 cargo package -p dioxus-storybook-core
@@ -118,6 +124,10 @@ cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
 | Globals | **args machinery reused** — a `Control` declaration, an `ArgMap` of values | widget, URL encoding and wire encoding all came free; there must not be a fourth value vocabulary |
 | Globals on the wire | **only the selections**, never the resolved set | both halves share the `&'static` declarations, and an empty map then means "nothing changed" |
 | Viewport | **a style on the iframe** — list on the `Project`, choice a parameter, selection a global | the shell owns the frame's width, so nothing crosses the wire; and `ParamValue` cannot hold a record, so the list is a declaration |
+| Autodocs | **an entry id, `title--docs`**, in the same space as a story | no `viewMode=docs`, no new wire message, no second transport; a real story wins the collision |
+| Docs page location | **the preview document** | its examples are real stories, and a story needs a scope, its decorators and its own CSS cascade |
+| Story source | **`Span::source_text()`**, not the token stream | a token stream renders `..base ()`; the span gives the code as written, comments included |
+| Doc comments quoted | **summary paragraph only**, inline markup rendered | rustdoc's own short-description rule; three constructs (code, emphasis, links) map to elements |
 | Platform | **web-first** | the static build is both the shareable artifact and the screenshot-test substrate |
 | Story bodies | **fn pointers invoked in-scope** | `rsx!`/`EventHandler::new` need an active Dioxus scope |
 | Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |
@@ -165,6 +175,10 @@ cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
 - **A derived `Default` on a config struct is a trap** once its `const fn new()`
   stops being all-zeroes. `Project::new()` fills in `DEFAULT_VIEWPORTS`, so
   `Default` is written out by hand to match it.
+- **`100vh` in a decorator is right on the canvas and wrong on a docs page.**
+  The canvas is one story owning the document; a docs page stacks a dozen
+  examples. There is no CSS fix — `vh` is always the viewport — so the decorator
+  must branch on `ctx.view()`. See `StoryView`.
 - **`key` only works inside a list.** Dioxus consults it in `diff_keyed_children`
   only; a lone keyed child is diffed in place and never remounts. The preview
   wraps `StoryHost` in `for def in [def]` for exactly this reason — do not

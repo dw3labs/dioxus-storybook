@@ -68,8 +68,16 @@ fn decorate(ctx: &StoryContext, story: Element) -> Element {
     } else {
         ""
     };
+    // The one thing a full-bleed decorator has to branch on. On the canvas the
+    // story owns the document, so 100vh is exactly the frame. On a docs page a
+    // dozen examples are stacked in a column, and 100vh would make every one of
+    // them a screen tall.
+    let fill = match ctx.view() {
+        StoryView::Docs => "min-height:0",
+        _ => "min-height:100vh",
+    };
     let style = format!(
-        "font-family:ui-sans-serif,system-ui,sans-serif;display:grid;place-items:center;         min-height:100vh;width:100%;background:{bg};color:{fg};{overlay}"
+        "font-family:ui-sans-serif,system-ui,sans-serif;display:grid;place-items:center;         {fill};width:100%;background:{bg};color:{fg};{overlay}"
     );
     rsx! {
         div { style: "{style}", {story} }

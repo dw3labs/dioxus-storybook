@@ -11,6 +11,9 @@ use crate::button::{Button, ButtonProps, ButtonVariant};
 story_meta! {
     title: "Forms/Button",
     component: Button,
+    description: "The gallery's primary action. Four variants, a size multiplier \
+                  and an optional tooltip — everything below is driven from the \
+                  props table, which the derive built from the type.",
     tags: ["autodocs"],
 }
 
@@ -26,11 +29,13 @@ fn base() -> ButtonProps {
     }
 }
 
+/// The default. Use one per view, for the action you want taken.
 #[story]
 fn primary() -> ButtonProps {
     base()
 }
 
+/// The counterweight to a primary: same size, less pull.
 #[story]
 fn secondary() -> ButtonProps {
     ButtonProps {
@@ -40,6 +45,7 @@ fn secondary() -> ButtonProps {
     }
 }
 
+/// Destructive, and carrying a tooltip that says so.
 #[story]
 fn danger() -> ButtonProps {
     ButtonProps {
@@ -50,6 +56,8 @@ fn danger() -> ButtonProps {
     }
 }
 
+/// Rejects interaction. The tooltip still works, because the bubble is on the
+/// wrapper rather than on the button.
 #[story]
 fn disabled() -> ButtonProps {
     ButtonProps {
@@ -58,6 +66,8 @@ fn disabled() -> ButtonProps {
     }
 }
 
+/// `scale` is a range control, so this is the same story as `Primary` with one
+/// slider moved.
 #[story(name = "Oversized")]
 fn oversized() -> ButtonProps {
     ButtonProps {

@@ -305,6 +305,18 @@ pub trait ControlEnum: Sized {
 /// field names, types and doc comments statically, and the applier it emits is
 /// checked by the compiler.
 pub trait Controllable: Sized {
+    /// The `///` doc comment on the props type itself.
+    ///
+    /// The docs page uses it as the component's description when
+    /// `story_meta!` did not give one — which covers the ordinary case, where
+    /// the props struct sits next to the component and is where it is
+    /// explained.
+    ///
+    /// Defaulted rather than required: this trait is derive-only by
+    /// documentation, but a default body is what keeps adding it a non-breaking
+    /// change for anyone who wrote an impl by hand anyway.
+    const DOCS: &'static str = "";
+
     /// One row per prop: type, docs, and which widget drives it.
     fn arg_types() -> &'static [crate::ArgType];
     /// Overlay dynamic args onto a typed base value.

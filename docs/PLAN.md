@@ -383,9 +383,66 @@ Split manager/preview into two documents + `postMessage` `Channel` impl (no addo
 > are the answer), and a story that panics now dies out of sight (a panic hook
 > reports it, since `panic = "abort"` rules out catching anything).
 
-### M4 · Docs (~3 weeks)
-Autodocs page per component · props table from `ArgType` + doc comments · story source snippet (macro captures the rsx token stream as `&'static str`) · description from component doc comments · docs/canvas tab toggle.
+### M4 · Docs — ✅ **COMPLETE** (session 0008)
+Autodocs page per component · props table from `ArgType` + doc comments · story source snippet · description from doc comments · docs/canvas toggle.
 > **Delivers:** the design-system deliverable. Highest external value per unit of work.
+>
+> All five shipped. 202 tests, `rust-analyzer diagnostics .` clean, and
+> `cargo doc --no-deps --workspace` clean — which it was *not* at the start of
+> the session, on a pre-existing broken intra-doc link nothing in the loop ran
+> rustdoc to catch. For a crate whose D1 ambition is publishing, docs.rs would
+> have failed the build; `cargo doc` is now part of the definition of done.
+>
+> **The milestone's shape, in one line: a docs page is an *id*, not a mode.**
+> `forms-button--docs` lives in the same id space as `forms-button--primary`, so
+> it travels in the existing `?id=`, the existing `Event::SetCurrentStory` and
+> the existing iframe. **The wire diff for M4 is empty.** The only new rule is
+> that a real story wins a collision — `--docs` is a legal story id, and the
+> author's own story must stay reachable.
+>
+> The page renders in the **preview**, and could not be anywhere else: every
+> example on it is a real story rendered through `render_decorated`, which needs
+> a live scope and needs the author's decorators to put the stylesheet inside
+> the frame. A docs page drawn by the manager would be components styled by the
+> workbench — the failure the M3 split exists to prevent.
+>
+> **One correction to the plan above.** "The macro captures the rsx token stream
+> as `&'static str`" would have produced `ButtonProps { variant : .. , .. base
+> () }` — a rendering of the tokens, not the code anyone wrote.
+> `block.brace_token.span.join().source_text()` returns the **exact source
+> text**, comments and indentation included, and falls back to the token stream
+> only when the story itself came out of another macro. Verified with a
+> throwaway proc macro before anything was built.
+>
+> **Two things the plan did not anticipate**, both found in the browser:
+> - **`100vh` in a decorator is right on the canvas and wrong on a docs page.**
+>   No CSS fixes it, so `StoryContext::view()` tells the decorator which surface
+>   it is on. Third growth of `StoryContext`, third time `#[non_exhaustive]`
+>   paid for itself.
+> - **A story's args write-back has nowhere to go on a docs page.** The
+>   manager's args belong to the *selected entry*, which is the page. Gating it
+>   off would make a controlled story inert, so a docs example keeps a local
+>   overlay and the manager never hears about it.
+>
+> A description has two sources, and the fallback is the useful one: a proc
+> macro cannot read the *component function's* doc comment, so `story_meta!`
+> gained `description:` — but `#[derive(Controls)]` already reads the props type,
+> so `Controllable::DOCS` carries its `///` and a component ends up documented
+> with no storybook-specific prose at all. Quoting stops at the **summary
+> paragraph**, rustdoc's own rule, and the three inline constructs that actually
+> occur (code, emphasis, links) are rendered rather than shown as literal
+> Markdown.
+>
+> Autodocs is **on for every component** by default — Storybook's opt-in tag
+> hides the feature — with `Autodocs::Tagged` for Storybook's rule and
+> `Autodocs::Never` to remove it. The landing entry is still the first *story*:
+> a component workbench that opens on prose is the wrong first impression.
+>
+> **Deliberately carried out of the milestone:** a sidebar row per docs page (it
+> means growing `TreeNode`/`RowKind`/`flatten` and the keyboard path, which is
+> the one part of the shell no test can reach and has already produced two
+> bugs); Markdown in a description beyond inline markup; syntax highlighting in
+> the source block. See LOG-0008.
 
 ### M5 · Static build & publish (~1–2 weeks)
 `dx-story build` → static site · index manifest · deep-linkable `iframe.html?id=…&args=…` · CI recipe (GitHub Pages).

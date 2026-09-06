@@ -42,7 +42,63 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemFn, LitStr, ReturnType, Token, Type};
 
+use crate::props::docs_of;
 use crate::{core_path, dioxus_path};
+
+/// The story's body, as the author wrote it, for the docs page's source block.
+///
+/// Taken from the *source text* of the block's span rather than from its token
+/// stream, so the snippet keeps the author's line breaks, indentation and
+/// comments. `quote!(#block).to_string()` would give
+/// `{ ButtonProps { variant : ... , .. base () } }`, which is a rendering of
+/// the tokens and not the code anyone wrote.
+///
+/// `source_text` is `None` when the span has no file behind it — a story that
+/// was itself produced by another macro. That falls back to the token stream,
+/// which is ugly but true.
+fn body_snippet(block: &syn::Block) -> String {
+    let raw = block
+        .brace_token
+        .span
+        .join()
+        .source_text()
+        .unwrap_or_else(|| quote!(#block).to_string());
+    dedent(strip_braces(&raw))
+}
+
+/// Drop the outer `{` / `}` of a block's source. The braces belong to the
+/// function, not to the example.
+fn strip_braces(raw: &str) -> &str {
+    raw.trim()
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .unwrap_or(raw)
+}
+
+/// Remove the common leading whitespace, so a body nested two levels deep in a
+/// file does not arrive on the docs page indented by eight columns.
+fn dedent(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .collect();
+    let end = lines
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .map_or(0, |i| i + 1);
+    let lines = &lines[..end];
+    let indent = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|l| if l.len() >= indent { &l[indent..] } else { l.trim_start() })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 /// One `key: value` pair inside a `parameters { .. }` block.
 ///
@@ -136,6 +192,7 @@ fn bridge_ident() -> Ident {
 pub struct MetaInput {
     title: LitStr,
     component: Ident,
+    description: Option<LitStr>,
     props: Option<Type>,
     tags: Vec<LitStr>,
     parameters: Vec<Param>,
@@ -146,6 +203,7 @@ impl Parse for MetaInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut title: Option<LitStr> = None;
         let mut component: Option<Ident> = None;
+        let mut description: Option<LitStr> = None;
         let mut props: Option<Type> = None;
         let mut tags: Vec<LitStr> = Vec::new();
         let mut parameters: Vec<Param> = Vec::new();
@@ -157,6 +215,7 @@ impl Parse for MetaInput {
             match key.to_string().as_str() {
                 "title" => title = Some(input.parse()?),
                 "component" => component = Some(input.parse()?),
+                "description" => description = Some(input.parse()?),
                 "props" => props = Some(input.parse()?),
                 "tags" => {
                     let content;
@@ -172,7 +231,8 @@ impl Parse for MetaInput {
                         key.span(),
                         format!(
                             "unknown story_meta key `{other}`; expected one of: \
-                             title, component, props, tags, parameters, decorators"
+                             title, component, description, props, tags, parameters, \
+                             decorators"
                         ),
                     ));
                 }
@@ -198,6 +258,7 @@ impl Parse for MetaInput {
         Ok(Self {
             title,
             component,
+            description,
             props,
             tags,
             parameters,
@@ -212,11 +273,13 @@ pub fn story_meta(input: MetaInput) -> TokenStream {
     let MetaInput {
         title,
         component,
+        description,
         props,
         tags,
         parameters,
         decorators,
     } = input;
+    let description = description.map_or_else(String::new, |d| d.value());
     let parameters = parameters_expr(&parameters);
     let decorators = decorators_expr(&decorators);
 
@@ -235,6 +298,7 @@ pub fn story_meta(input: MetaInput) -> TokenStream {
         #[doc(hidden)]
         pub const #meta: #core::Meta =
             #core::Meta::new(#title, #component_name)
+                .with_description(#description)
                 .with_tags(&[ #(#tags),* ])
                 .with_parameters(#parameters)
                 .with_decorators(#decorators);
@@ -340,6 +404,11 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
         .name
         .map(|l| l.value())
         .unwrap_or_else(|| display_name(&fn_ident));
+    // The story's own `///`, and its body as written. Both are read straight
+    // off the item the attribute was placed on, which is why autodocs needs no
+    // docgen pass and no sidecar file.
+    let story_docs = docs_of(&func.attrs);
+    let source = body_snippet(&func.block);
     let parameters = parameters_expr(&args.parameters);
     let decorators = decorators_expr(&args.decorators);
     let static_name = static_ident(&fn_ident);
@@ -395,6 +464,10 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
         let extras = quote! {
             .with_arg_types(<#return_ty as #core::Controllable>::arg_types)
             .with_base_args(|| <#return_ty as #core::Controllable>::to_args(&#seed_call))
+            // The props type's own doc comment, as the docs page's fallback
+            // description. An associated *const*, so it is readable here in the
+            // `const` initialiser this whole static is.
+            .with_component_docs(<#return_ty as #core::Controllable>::DOCS)
         };
         (body, extras)
     };
@@ -412,6 +485,8 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
                 #render_body
             })
             #extras
+            .with_docs(#story_docs)
+            .with_source(#source)
             .with_tags(#meta.tags())
             .with_parameters(#parameters)
             .with_decorators(#decorators)

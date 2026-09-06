@@ -12,6 +12,8 @@ STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
           M3 (isolation, globals, environment) COMPLETE — iframe split,
             decorators + parameters, panic reporting, globals + toolbar,
             viewport addon.
+          M4 (docs) COMPLETE — a generated documentation page per component:
+            props table, description, per-story blurb and per-story source.
 SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
 NAME      dioxus-storybook · MIT · (c) DW3Labs
 TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
@@ -21,45 +23,59 @@ TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
  HOT — what happens next
 --------------------------------------------------------------------------------
 
-NOTHING IS BLOCKED. M3 IS DONE. Session 0007 added the viewport addon, which
-turned out to be a `<select>` and a style attribute — the frame's width belongs
-to the shell, so nothing about it crosses the wire. M4 is the next milestone.
+NOTHING IS BLOCKED. M4 IS DONE. Session 0008 shipped autodocs, and the shape of
+it is one sentence: A DOCS PAGE IS AN ID, NOT A MODE. `forms-button--docs` sits
+in the same id space as `forms-button--primary`, so it travels in the existing
+`?id=`, the existing `Event::SetCurrentStory` and the existing iframe. THE WIRE
+DIFF FOR M4 IS EMPTY. M5 (static build & publish) or M6 (testing) is next, and
+D3 is the open question about which.
 
-DONE IN M3 (all six)
-  [x] Manager/preview split + postMessage Channel. No addon changed.
-  [x] Decorators at 3 levels (project -> component -> story, outermost first).
-  [x] Parameters with merge semantics (ResolvedParameters, innermost wins).
-  [x] Panic reporting: the preview's panic hook posts Event::PreviewPanicked,
-      the shell shows it with a "Reload the preview" button.
-  [x] Globals + toolbar, carried in the URL as `&globals=theme:dark`.
-  [x] parameters.layout — centered / padded / fullscreen.
-  [x] Viewport addon: a picker + rotate in the toolbar, a sized iframe, and
-      `parameters { viewport: "mobile" }` for a story that should open small.
-      LIST = a Project declaration, CHOICE = a parameter, SELECTION = a global.
+DONE IN M4 (all five plan items)
+  [x] Autodocs page per component, resolved from the registry.
+  [x] Props table from ArgType + `///`, with real evaluated defaults.
+  [x] Per-story source snippet — the code AS WRITTEN, via Span::source_text().
+  [x] Description from doc comments: `story_meta! { description }`, falling back
+      to the props type's `///` via the new `Controllable::DOCS`.
+  [x] Canvas/Docs toggle in the toolbar.
+  Plus, not in the plan and both found in the browser:
+  [x] `StoryContext::view()` — `100vh` is right on a canvas and wrong on a page.
+  [x] A local args overlay for docs examples, so a controlled story is typeable.
+  [x] The toolbar became a 3-column grid so the toggle stops moving (user report).
+  [x] `cargo doc` was ALREADY RED on main and is now green and in the DoD.
 
-NEXT UP — pick one, and read LOG-0007's "notes for the next session" first
-  [ ] START M4 (docs / autodocs) if the milestone order stands. docs/PLAN.md
-      is what M4 means; its milestone table was brought current in 0007, so it
-      can be trusted about scope. NOTE what M3 shed on the way out — backgrounds,
-      measure, outline and the ErrorBoundary are recorded there as carried, not
-      delivered. Decide whether any of them belongs before M4 rather than after.
+NEXT UP — read LOG-0008's "notes for the next session" first
+  [ ] ANSWER D3, then start M5 or M6. M4 was the last milestone whose order was
+      not in question; from here the plan asks which of publish-early or
+      test-early matters more. docs/PLAN.md's milestone table is current.
+  [ ] A SIDEBAR ROW per docs page. The toggle and a URL are the only ways in
+      today. Storybook puts a "Docs" row first under each component group, which
+      means TreeNode / RowKind / flatten grow a variant AND the keyboard path
+      has to handle it. Deliberately skipped in 0008: the keyboard path is the
+      one part of the shell no test can reach, and it has already produced two
+      bugs (LOG-0007/F4 and the search box below).
+  [ ] MARKDOWN beyond inline markup in a description. `inline.rs` renders code,
+      emphasis and links; blocks (lists, headings, fences) pass through as text.
+      A real renderer is a dependency plus a sanitiser decision. PLAN.md defers
+      MDX and names plain `.md` as the substitute; nothing was built for it.
+  [ ] SYNTAX HIGHLIGHTING in the source block. It is a dark <pre> today.
   [ ] backgrounds addon. DECIDE FIRST whether it is a built-in or just the
       documented decorator pattern; the example's theme decorator already does
       the job by hand and the two would overlap. Do not write both.
-  [ ] measure / outline. Preview-side overlays driven by a global toggle — the
-      first addon that must put something INSIDE the frame, unlike viewport.
+  [ ] measure / outline. Preview-side overlays driven by a global toggle — still
+      the first addon that must put something INSIDE the frame.
   [ ] ErrorBoundary for Element-level errors. DISTINCT from the panic hook,
-      which shipped in 0005. It catches a story returning `Err`; it cannot catch
-      a panic, because wasm here is panic="abort".
+      which shipped in 0005.
   [ ] MEASURE FIRST (carried from LOG-0004): Callback::new runs once per action
-      prop PER RENDER inside wire_actions. Entries free only when StoryHost
-      remounts. Bounded, but drag a slider and find out.
+      prop PER RENDER inside wire_actions. NOTE THIS GOT MORE INTERESTING: a
+      docs page mounts every story of a component at once, so whatever one story
+      costs, a docs page pays it N times.
 
 READY TO RUN:
-  cargo test --workspace                      152 tests + 19 doctests, all green
+  cargo test --workspace                      202 tests + doctests, all green
   rust-analyzer diagnostics .                 MUST stay clean — see standing facts
-  cd examples/button-gallery && dx serve --platform web    17 stories, 2 globals,
-                                              5 viewports, 1 responsive component
+  cargo doc --no-deps --workspace             MUST stay clean — new in M4, see F6
+  cd examples/button-gallery && dx serve --platform web    17 stories, 5 docs
+                                              pages, 2 globals, 5 viewports
   cargo package -p dioxus-storybook-core      verifies the publish metadata
   cd spikes/s4-iframe && dx serve --platform web           the M3 iframe spike
 
@@ -76,19 +92,17 @@ SMALL FOLLOW-UPS (unblocked, do any time):
   [ ] The preview document has no `<title>` of its own. Harmless, but a framed
       document showing up in a11y trees as untitled is worth 5 minutes at M6.
   [ ] docs/plan-artifact.html is the PUBLISHED version of docs/PLAN.md and is now
-      three sessions behind it.
+      FOUR sessions behind it.
   [ ] Arrow keys inside the SEARCH BOX still move the sidebar cursor. The
       toolbar was fixed in 0007 (swallow_toolbar_keys); the search input has the
       same problem and the same one-line fix.
 
 STILL OPEN:
   D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
-      for rigour? Cannot do both first.
+      for rigour? Cannot do both first. THIS IS NOW THE LIVE QUESTION.
   D4  Is `dx serve --platform desktop` in scope at all, or web-only forever?
-      NOTE: M3 raised the cost of a yes TWICE. The split assumes a document
-      boundary, and the viewport addon assumes a frame the shell can resize.
-      Desktop has neither, so it would need the InProcessChannel path back and
-      a second answer for the canvas size.
+      NOTE: M3 raised the cost of a yes TWICE, and M4 did not raise it further —
+      the docs page is a document, and desktop has one of those.
 
 DO NOT DO:
   - Do not reach for `linkme` or `inventory` for the story registry. Both were
@@ -98,6 +112,18 @@ DO NOT DO:
     plan and it is worse: two builds, a hand-written iframe.html, and a manager
     that can no longer see the registry it needs for the sidebar and the props
     tables. One bundle loaded twice gives the same isolation. LOG-0005 / F1.
+  - Do not add a `viewMode=docs`, a `SetViewMode` message, or any second mode
+    for the docs page. It is an ENTRY ID in the id space stories already use,
+    and that is what made M4's wire diff empty. LOG-0008 / F1.
+  - Do not make `docs::entry` check for a docs page before checking the
+    registry. `--docs` is a legal STORY id — a story named "Docs" collides — and
+    the author's own story is the one that must win.
+  - Do not render the docs page in the MANAGER. Its examples are real stories:
+    they need a live scope, they need their decorators, and they need the
+    preview's CSS cascade rather than the shell's. LOG-0008 / F2.
+  - Do not capture a story's source with `quote!(#block).to_string()`. It gives
+    `ButtonProps { variant : .. , .. base () }`. Use
+    `block.brace_token.span.join().source_text()`. LOG-0008 / F7.
   - Do not add a `_ =>` wildcard arm to `wire::encode`. `Event` is
     #[non_exhaustive] for downstream crates but exhaustive inside core, so a new
     variant FAILS TO COMPILE until it is given a wire form. That is the only
@@ -123,18 +149,29 @@ DO NOT DO:
     line — its harness deliberately has the stricter behaviour. This also means
     a test that injects SetCurrentStory moves the PREVIEW only; to test the
     shell landing somewhere, change the order of the story slice.
+  - Do not let a StoryHost on a docs page report itself. A docs page mounts
+    every story of a component at once; StoryPrepared would seed the controls
+    panel from an arbitrary one and StoryRendered would leave the status bar
+    naming whichever mounted last. That is what `reporting: false` is for.
+  - Do not send a docs example's args write-back to the manager. The manager's
+    args belong to the SELECTED ENTRY, which on a docs page is the page — so it
+    would land in the address bar under a docs id. The example keeps a local
+    overlay, which is also what keeps a controlled story typeable there rather
+    than inert. LOG-0008 / F4.
   - Do not let the MANAGER call StoryDef::base_args() or render a decorator.
     Both need a live scope and a story, and the manager has neither. The manager
-    is given the Project for TWO reasons now: the globals the toolbar offers,
-    and the viewports the picker offers. Reading a story's PARAMETERS is fine —
-    they are static data, and the manager needs them to size the frame.
+    is given the Project for THREE reasons now: the globals the toolbar offers,
+    the viewports the picker offers, and `Project::autodocs` — which decides
+    whether the Canvas/Docs toggle is drawn at all. Reading a story's PARAMETERS
+    is fine — they are static data, and the manager needs them to size the frame.
   - Do not render a story body inline in the preview again. Stories get their
     own scope via StoryHost, remounted per story. See LOG-0004 / F2.
   - Do not "simplify" the one-element `for def in [def]` loop around StoryHost
     into a plain child. Dioxus only honours `key` when diffing a LIST; a lone
-    keyed child is re-rendered in place and the hook bug comes back. Note the
-    flip side: StoryHost is keyed on the STORY ID, so changing a global
-    re-renders it in place and a story's hook state survives. That is wanted.
+    keyed child is re-rendered in place and the hook bug comes back. The docs
+    page uses the same one-element loop for the same reason. Note the flip side:
+    StoryHost is keyed on the STORY ID, so changing a global re-renders it in
+    place and a story's hook state survives. That is wanted.
   - Do not add a controls panel that mutates the preview's args signal directly.
     Route it through the Channel.
   - Do not emit a `macro_rules!` from one proc macro for another to call with a
@@ -151,7 +188,8 @@ DO NOT DO:
     the manager must be Signal::new_in_scope(.., ScopeId::ROOT). See LOG-0004/F8.
   - Do not trust a green suite for UI work. 92 tests passed while two real
     defects sat in the running app; 152 passed while the toolbar's dropdowns
-    were unusable from the keyboard. Open the browser and click it.
+    were unusable from the keyboard; 195 passed while the Canvas/Docs toggle
+    slid out from under the cursor every time it was used. Open the browser.
   - Do not emit `<label for=..>` unconditionally in the controls panel. Action
     and skipped rows render prose with no control to point at, and radio rows
     key their inputs per option. Use `label_target`. See LOG-0004/F9.
@@ -214,6 +252,15 @@ DO NOT DO:
  STANDING FACTS  (things that cost time to learn — do not re-derive)
 --------------------------------------------------------------------------------
 
+DEFINITION OF DONE
+  * THREE commands, not one. `cargo test --workspace`,
+    `rust-analyzer diagnostics .` (see PROC MACROS below) and, since 0008,
+    `cargo doc --no-deps --workspace`. The last one was ALREADY RED on main when
+    M4 started — a broken intra-doc link in `wire.rs` that nothing in the loop
+    ran rustdoc to catch. For a crate whose D1 ambition is publishing, docs.rs
+    would have failed the build. And none of the three replaces opening the
+    browser; see TESTING TRAPS.
+
 TOOLCHAIN
   * `dx` and the `dioxus` crate versions must match EXACTLY or dx refuses to run.
   * Workspace is edition 2024 -> `#[no_mangle]` must be `#[unsafe(no_mangle)]`.
@@ -265,6 +312,46 @@ THE VIEWPORT ADDON  (session 0007)
   * `viewport::resolve` is called by BOTH halves — the manager to size the frame,
     the preview to fill in StoryContext::viewport. Same reason `landing_story` is
     shared: two implementations of one rule will drift.
+
+AUTODOCS  (session 0008)
+  * A DOCS PAGE IS AN ID, NOT A MODE. `kebab(title) + "--docs"` lives in the same
+    id space a story does, so it needs no URL parameter, no wire message and no
+    second transport. M4's diff to `wire.rs` is EMPTY. `docs::entry` resolves an
+    id to `Entry::Story` or `Entry::Docs`, asking the registry FIRST — because
+    `--docs` is a legal story id and a story named "Docs" must win the collision.
+  * IT RENDERS IN THE PREVIEW, and could not be anywhere else. Every example on
+    it is a real story through `render_decorated`, which needs a live scope, the
+    author's decorators, and the preview's CSS cascade. A page drawn by the
+    manager would be components styled by the workbench.
+  * `Span::source_text()` GIVES THE CODE AS WRITTEN.
+    `block.brace_token.span.join().source_text()` returns the exact bytes —
+    comments, line breaks, indentation. `quote!(#block).to_string()` gives
+    `ButtonProps { variant : .. , .. base () }`, a rendering of the tokens.
+    `Span::call_site()` gives only the attribute (`#[story]`), and the block's
+    *open* delimiter alone gives `{`; the JOIN is what makes it work.
+    `DelimSpan::join()` is available on stable through proc-macro2. `None` means
+    the item came out of another macro — fall back to the token stream.
+  * `100vh` IN A DECORATOR HAS TWO RIGHT ANSWERS. On the canvas the story owns
+    the document and 100vh is the frame; on a docs page a dozen examples stack
+    and each becomes a screen tall. No CSS fixes it — `vh` is always the viewport
+    and no containing block redefines it. `StoryContext::view()` is how a
+    decorator is told. Storybook has the same footgun and no better answer.
+  * A DOCS EXAMPLE'S ARGS HAVE NOWHERE TO GO. `use_args` writes back through the
+    manager, whose args belong to the SELECTED ENTRY — on a docs page, the page.
+    Gating it off would make a controlled story inert, so `StoryHost` keeps a
+    local overlay when `reporting` is false.
+  * A DOC COMMENT IS RUSTDOC, AND RUSTDOC IS MARKDOWN. The macro captures only
+    the SUMMARY PARAGRAPH (rustdoc's own short-description rule) and
+    `ui/src/inline.rs` renders the three inline constructs that actually occur —
+    code spans, emphasis, links-reduced-to-their-label. Quoting raw puts
+    `` `oninput` `` and `**bold**` on the page verbatim, which reads as a typo.
+  * A DESCRIPTION HAS TWO SOURCES because a proc macro cannot see the COMPONENT
+    FUNCTION's doc comment — it only sees the tokens it was invoked on. So
+    `story_meta! { description }` is explicit, and `Controllable::DOCS` (the
+    props type's `///`, captured by the derive) is the fallback. The fallback is
+    the useful one: it documents a component with no storybook-specific prose.
+    `DOCS` is an associated const WITH A DEFAULT, so adding it to `Controllable`
+    broke no hand-written impl — unlike `wire_actions` in 0004.
 
 VALUE VOCABULARIES  (there are three, and there must not be a fourth)
   * args      change at run time, scoped to ONE STORY, declared by the props type
@@ -368,6 +455,14 @@ TESTING TRAPS (all produced convincing WRONG answers)
   * macOS `sed -i ''` writes a sibling temp file (`.!PID!name.rs`). dx's file
     watcher latches onto THAT, not your file. Never use it to script an edit for
     a hot-reload measurement; write in place instead.
+  * A HEADLESS VirtualDom CANNOT DELIVER A CLICK EITHER. In 0008 the
+    Canvas/Docs toggle sat before the viewport picker, which is hidden on a docs
+    page — so clicking "Docs" made the picker vanish and the toggle slide out
+    from under the cursor. 195 tests were green. The user reported it from the
+    browser within minutes. Fix: the toolbar is a `1fr auto 1fr` GRID — crumb
+    left, story id exactly centred, tools right with the toggle last against the
+    edge — so only what is to the LEFT of the toggle ever changes. A flex row
+    with a spacer cannot promise the centre column stays centred.
   * A HEADLESS VirtualDom CANNOT DELIVER A KEYSTROKE. Everything keyboard-shaped
     in the shell — the sidebar's arrow navigation, `/` for search, and the fact
     that a focused toolbar `<select>` was having its arrow keys stolen by that

@@ -34,6 +34,8 @@
 #![deny(missing_docs)]
 
 mod browser;
+mod docs;
+mod inline;
 mod panels;
 mod style;
 mod toolbar;
@@ -43,12 +45,14 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_storybook_core::viewport::{self, RESPONSIVE, ROTATED_GLOBAL, VIEWPORT_GLOBAL};
+use dioxus_storybook_core::docs::{self as autodocs, Entry};
 use dioxus_storybook_core::{
     ActionSink, ArgMap, ArgValue, ArgsHandle, Channel, ChannelHandle, Event, Project, Registry,
-    Row, RowKind, StoryDef, UrlState, ViewMode, ViewportSelection, flatten,
+    Row, RowKind, StoryDef, StoryView, UrlState, ViewMode, ViewportSelection, flatten,
 };
 
-use toolbar::{GlobalsBar, ViewportPicker};
+use docs::DocsView;
+use toolbar::{DocsToggle, GlobalsBar, ViewportPicker};
 
 use panels::{ACTION_LOG_CAP, ActionEntry, AddonPanel, PanelTab};
 
@@ -69,9 +73,15 @@ const PREVIEW_FRAME_ID: &str = "dxsb-preview-frame";
 /// the preview is an iframe with its own `?id=` URL, and keeping that true here
 /// is what makes the M3 split a transport change rather than a rewrite. They
 /// share this one function so the two answers cannot drift apart.
-fn landing_story(registry: Registry, requested: Option<&str>) -> Option<String> {
+///
+/// The requested id may name a **docs page** rather than a story — the two live
+/// in one id space, which is what lets `?id=forms-button--docs` be an ordinary
+/// link. The fallback is still the first story, not the first docs page: a
+/// storybook that opens on prose rather than on a component is the wrong first
+/// impression of a component workbench.
+fn landing_story(registry: Registry, project: Project, requested: Option<&str>) -> Option<String> {
     requested
-        .filter(|id| registry.get(id).is_some())
+        .filter(|id| autodocs::entry(registry, project, id).is_some())
         .map(str::to_string)
         .or_else(|| registry.first().map(StoryDef::id))
 }
@@ -160,7 +170,7 @@ pub fn StorybookManager(
     // truth at startup, not a mirror written afterwards.
     let initial = use_hook(browser::read_url_state);
     let requested = initial.id.clone();
-    let landing = landing_story(registry, requested.as_deref());
+    let landing = landing_story(registry, project, requested.as_deref());
 
     let mut selected = use_signal(|| landing.clone());
     let mut args = use_signal(|| initial.args.clone());
@@ -176,7 +186,7 @@ pub fn StorybookManager(
     let mut stale_link = use_signal(|| {
         requested
             .clone()
-            .filter(|id| registry.get(id).is_none())
+            .filter(|id| autodocs::entry(registry, project, id).is_none())
     });
 
     // Addon-panel state. The controls panel edits `args`; the two signals below
@@ -352,7 +362,21 @@ pub fn StorybookManager(
     // iframe, which is precisely why nothing else may touch it.
     let mut reloads = use_signal(|| 0usize);
 
-    let current = selected().and_then(|id| registry.get(&id));
+    // An id names either a story or a component's docs page. Resolving it here,
+    // once, is what keeps the rest of the shell — the crumb, the frame, the
+    // panel — from each having to ask the question again and get it differently.
+    let current = selected().and_then(|id| autodocs::entry(registry, project, &id));
+    let current_story = current.as_ref().and_then(Entry::story);
+    let on_docs = current.as_ref().is_some_and(|e| e.docs().is_some());
+    // `Some` exactly when the Canvas/Docs toggle should be drawn: this
+    // component has a docs page under `Project::autodocs`.
+    let docs_id = current.as_ref().and_then(|entry| match entry {
+        Entry::Story(def) => autodocs::id_for_story(project, def),
+        Entry::Docs(page) => Some(page.id()),
+    });
+    let canvas_id = current
+        .as_ref()
+        .and_then(|entry| autodocs::canvas_id_for(registry, entry.title()));
     let row_list = rows();
 
     // The canvas size, decided by the same function the preview uses to fill in
@@ -362,15 +386,74 @@ pub fn StorybookManager(
     // The story's parameters are part of the input, which is why this is
     // recomputed per render rather than kept in a signal: walking the sidebar
     // onto a story that asks for a phone must change the frame.
-    let story_parameters = current
+    let story_parameters = current_story
         .map(|def| def.resolved_parameters(project))
         .unwrap_or_default();
     let viewports = project.viewports();
-    let viewport_selection = viewport::resolve(viewports, &globals(), story_parameters);
+    // A docs page is a page, not a canvas: it is a column of prose and examples
+    // that has to be readable, and squeezing it into a 360px phone frame would
+    // be measuring the documentation rather than the component. The picker is
+    // hidden there rather than merely ignored, so nothing claims to be in force
+    // that is not.
+    let viewport_selection = (!on_docs)
+        .then(|| viewport::resolve(viewports, &globals(), story_parameters))
+        .flatten();
     // Clearing the overrides already tells the preview everything it needs, but
     // `ResetArgs` is emitted anyway: from M3 the preview holds state the manager
     // cannot see, and "go back to defaults" has to be a message, not an absence.
     let resetter = channel.clone();
+
+    // The viewport picker, built once here rather than inline in the toolbar,
+    // because a docs page gets *no* picker: the frame is not sized there, and a
+    // control still reading "Tablet" beside a plainly full-width page would be
+    // claiming something untrue.
+    let viewport_picker: Element = if on_docs {
+        rsx! {}
+    } else {
+        rsx! {
+            ViewportPicker {
+                available: viewports,
+                selection: viewport_selection,
+                on_pick: move |name: String| {
+                    // Into the globals signal like any other
+                    // selection: the effect above is what puts it
+                    // on the wire and in the link.
+                    let mut selections = globals.write();
+                    if name == RESPONSIVE
+                        && !viewport::responsive_needs_saying(
+                            viewports,
+                            &selections,
+                            story_parameters,
+                        )
+                    {
+                        // Nothing to override, so say nothing:
+                        // an absent key keeps the link short and
+                        // keeps "the map is empty" meaning
+                        // "nothing has been changed".
+                        selections.remove(VIEWPORT_GLOBAL);
+                        selections.remove(ROTATED_GLOBAL);
+                    } else {
+                        selections.set(VIEWPORT_GLOBAL, ArgValue::Variant(name));
+                    }
+                },
+                on_rotate: move |()| {
+                    let mut selections = globals.write();
+                    let rotated = selections
+                        .get(ROTATED_GLOBAL)
+                        .and_then(ArgValue::as_bool)
+                        .unwrap_or(false);
+                    // Removed rather than set to false, so an
+                    // unrotated canvas leaves nothing behind in
+                    // the URL to explain.
+                    if rotated {
+                        selections.remove(ROTATED_GLOBAL);
+                    } else {
+                        selections.set(ROTATED_GLOBAL, ArgValue::Bool(true));
+                    }
+                },
+            }
+        }
+    };
 
     rsx! {
         style { {MANAGER_CSS} }
@@ -413,7 +496,7 @@ pub fn StorybookManager(
             aside { class: "dxsb-sidebar",
                 div { class: "dxsb-brand",
                     span { "dioxus-storybook" }
-                    span { class: "dxsb-badge", "M3" }
+                    span { class: "dxsb-badge", "M4" }
                 }
                 div { class: "dxsb-searchwrap",
                     input {
@@ -466,50 +549,21 @@ pub fn StorybookManager(
 
             main { class: "dxsb-main",
                 Toolbar {
-                    story: current,
-                    viewport: rsx! {
-                        ViewportPicker {
-                            available: viewports,
-                            selection: viewport_selection,
-                            on_pick: move |name: String| {
-                                // Into the globals signal like any other
-                                // selection: the effect above is what puts it
-                                // on the wire and in the link.
-                                let mut selections = globals.write();
-                                if name == RESPONSIVE
-                                    && !viewport::responsive_needs_saying(
-                                        viewports,
-                                        &selections,
-                                        story_parameters,
-                                    )
-                                {
-                                    // Nothing to override, so say nothing:
-                                    // an absent key keeps the link short and
-                                    // keeps "the map is empty" meaning
-                                    // "nothing has been changed".
-                                    selections.remove(VIEWPORT_GLOBAL);
-                                    selections.remove(ROTATED_GLOBAL);
-                                } else {
-                                    selections.set(VIEWPORT_GLOBAL, ArgValue::Variant(name));
-                                }
-                            },
-                            on_rotate: move |()| {
-                                let mut selections = globals.write();
-                                let rotated = selections
-                                    .get(ROTATED_GLOBAL)
-                                    .and_then(ArgValue::as_bool)
-                                    .unwrap_or(false);
-                                // Removed rather than set to false, so an
-                                // unrotated canvas leaves nothing behind in
-                                // the URL to explain.
-                                if rotated {
-                                    selections.remove(ROTATED_GLOBAL);
-                                } else {
-                                    selections.set(ROTATED_GLOBAL, ArgValue::Bool(true));
-                                }
-                            },
+                    entry: current.clone(),
+                    docs: rsx! {
+                        DocsToggle {
+                            docs_id,
+                            canvas_id,
+                            on_docs,
+                            // Straight through `select_story`: switching between
+                            // a component's canvas and its docs is selecting a
+                            // different entry, and everything that follows from
+                            // that — the URL, the wire, the cleared args — has
+                            // to follow from it here too.
+                            on_pick: move |id: String| select_story(id),
                         }
                     },
+                    viewport: viewport_picker,
                     globals: rsx! {
                         GlobalsBar {
                             declared: project.globals(),
@@ -556,11 +610,12 @@ pub fn StorybookManager(
                 }
                 PreviewStage { src: frame_src(), viewport: viewport_selection }
                 AddonPanel {
-                    arg_types: current.map(StoryDef::arg_types).unwrap_or(&[]),
+                    arg_types: current_story.map(StoryDef::arg_types).unwrap_or(&[]),
                     initial: initial_args(),
                     overrides: args(),
                     actions: actions(),
                     tab: tab(),
+                    on_docs,
                     open: panel_open(),
                     on_tab: move |next| { tab.set(next); panel_open.set(true); },
                     on_toggle: move |()| { let open = panel_open(); panel_open.set(!open); },
@@ -663,39 +718,60 @@ fn swallow_toolbar_keys(event: KeyboardEvent) {
 }
 
 #[component]
-fn Toolbar(story: Option<&'static StoryDef>, viewport: Element, globals: Element) -> Element {
-    let Some(story) = story else {
+fn Toolbar(
+    entry: Option<Entry>,
+    docs: Element,
+    viewport: Element,
+    globals: Element,
+) -> Element {
+    let Some(entry) = entry else {
         return rsx! {
             header { class: "dxsb-toolbar", onkeydown: swallow_toolbar_keys,
                 span { class: "dxsb-crumb", "No story selected" }
-                span { class: "dxsb-spacer" }
-                {viewport}
-                {globals}
+                span { class: "dxsb-id" }
+                span { class: "dxsb-tools",
+                    {viewport}
+                    {globals}
+                    {docs}
+                }
             }
         };
     };
-    let id = story.id();
+    // The last crumb is the story's name, or the word Docs — which is also the
+    // only thing that distinguishes the two entries a component has.
+    let (id, leaf, tags) = match &entry {
+        Entry::Story(def) => (def.id(), def.name(), def.tags()),
+        Entry::Docs(page) => (page.id(), "Docs", &[] as &[&'static str]),
+    };
+    // Three columns, not a flex row with a spacer. The middle column is
+    // centred on the toolbar whatever the two sides hold, and the Canvas/Docs
+    // toggle is last in the right-hand group — so the one control the user
+    // reaches for to *change* what is showing does not move when what is
+    // showing changes. The viewport picker, which appears on a canvas and
+    // vanishes on a docs page, is the reason that mattered.
     rsx! {
         header { class: "dxsb-toolbar", onkeydown: swallow_toolbar_keys,
             span { class: "dxsb-crumb",
-                for (i, segment) in story.title().split('/').enumerate() {
+                for (i, segment) in entry.title().split('/').enumerate() {
                     if i > 0 {
                         span { class: "sep", "/" }
                     }
                     span { "{segment}" }
                 }
                 span { class: "sep", "/" }
-                span { "{story.name()}" }
-            }
-            span { class: "dxsb-spacer" }
-            {viewport}
-            {globals}
-            span { class: "dxsb-tagrow",
-                for tag in story.tags().iter() {
-                    span { class: "dxsb-tag", "{tag}" }
-                }
+                span { "{leaf}" }
             }
             span { class: "dxsb-id", "{id}" }
+            span { class: "dxsb-tools",
+                span { class: "dxsb-tagrow",
+                    for tag in tags.iter() {
+                        span { class: "dxsb-tag", "{tag}" }
+                    }
+                }
+                {viewport}
+                {globals}
+                {docs}
+            }
         }
     }
 }
@@ -815,7 +891,10 @@ fn Preview(registry: Registry, project: Project) -> Element {
     // over the channel.
     let (current, args, globals) = use_hook(|| {
         (
-            Signal::new_in_scope(landing_story(registry, startup.id.as_deref()), ScopeId::ROOT),
+            Signal::new_in_scope(
+                landing_story(registry, project, startup.id.as_deref()),
+                ScopeId::ROOT,
+            ),
             Signal::new_in_scope(startup.args.clone(), ScopeId::ROOT),
             // Read from this document's own URL, like everything else here: the
             // frame's `src` carries the globals so the first paint is already
@@ -855,12 +934,15 @@ fn Preview(registry: Registry, project: Project) -> Element {
     let reporter = channel.clone();
     use_effect(move || {
         let Some(id) = current() else { return };
-        if registry.get(&id).is_none() {
+        // An id that resolves to a docs page is not missing. This is the one
+        // place the preview has to know the two entry kinds share an id space —
+        // everything else about a docs page is decided by the `match` below.
+        if autodocs::entry(registry, project, &id).is_none() {
             reporter.emit(Event::StoryMissing { id });
         }
     });
 
-    let story = current().and_then(|id| registry.get(&id));
+    let entry = current().and_then(|id| autodocs::entry(registry, project, &id));
     let overrides = args();
     let selected_globals = globals();
 
@@ -869,13 +951,21 @@ fn Preview(registry: Registry, project: Project) -> Element {
     // gets to make: whether the canvas centres it, stacks it at the top, or
     // hands over the whole frame. A decorator painting a theme needs the last
     // one, because 40px of canvas padding is 40px it cannot paint.
-    let layout = story
+    let layout = entry
+        .as_ref()
+        .and_then(Entry::story)
         .map(|def| canvas_layout(def.resolved_parameters(project).str("layout")))
         .unwrap_or("centered");
     let canvas_class = format!("dxsb-canvas layout-{layout}");
 
-    match story {
-        Some(def) => rsx! {
+    match entry {
+        // A docs page owns the whole document rather than sitting on the
+        // canvas: it scrolls, it is a column of prose, and `layout` is a
+        // decision about how to place *one* story on a surface.
+        Some(Entry::Docs(page)) => rsx! {
+            DocsView { page, globals: selected_globals, project }
+        },
+        Some(Entry::Story(def)) => rsx! {
             section { class: "{canvas_class}",
                 // A keyed list of exactly one. That is not a flourish: Dioxus
                 // only honours `key` when diffing a list, and what is needed
@@ -894,7 +984,7 @@ fn Preview(registry: Registry, project: Project) -> Element {
                 }
             }
         },
-        None => rsx! {
+        _ => rsx! {
             section { class: "{canvas_class}",
                 div { class: "dxsb-blank",
                     if registry.is_empty() {
@@ -938,11 +1028,23 @@ fn canvas_layout(requested: Option<&'static str>) -> &'static str {
 ///   — the manager must not compute it, because from M3 the story functions live
 ///   in the other bundle.
 #[component]
-fn StoryHost(
+pub(crate) fn StoryHost(
     story: &'static StoryDef,
     args: ArgMap,
     globals: ArgMap,
     project: Project,
+    /// Whether this host tells the manager what it is doing.
+    ///
+    /// True on the canvas, where exactly one story is mounted and the shell's
+    /// status bar and controls panel are about it. False on a docs page, which
+    /// mounts every story of a component at once — there, `StoryPrepared` would
+    /// seed the controls panel from an arbitrary one and `StoryRendered` would
+    /// leave the status bar naming whichever mounted last.
+    #[props(default = true)]
+    reporting: bool,
+    /// Which surface this story is on, passed through to its decorators.
+    #[props(default)]
+    view: StoryView,
 ) -> Element {
     let channel: ChannelHandle = use_context();
     let id = story.id();
@@ -957,36 +1059,65 @@ fn StoryHost(
         })
     });
 
+    // A story writing its own args back has two possible destinations, and
+    // which one is right follows from whether the manager is watching this host.
+    //
+    // On the **canvas** it goes to the manager, which merges and re-broadcasts:
+    // the manager is the single place that decides what the current arg set is,
+    // and a local copy here would be a second one.
+    //
+    // On a **docs page** there is no such place. The manager's args belong to
+    // the selected entry, and the selected entry is the page — so a write from
+    // one of a dozen examples has nothing to merge into. Sending it anyway would
+    // put an arg in the address bar under a docs id. The example gets a local
+    // overlay instead, which is what keeps a controlled story on a docs page
+    // actually typeable rather than inert.
+    let local_args = use_signal(ArgMap::new);
     let write_channel = channel.clone();
     let write_id = id.clone();
     use_context_provider(|| {
         ArgsHandle::new(move |name: String, value: ArgValue| {
-            // A delta, not a replacement: the story knows the one arg it just
-            // changed and nothing about the rest of the set.
-            write_channel.emit(Event::RequestArgsUpdate {
-                id: write_id.clone(),
-                args: ArgMap::new().with(name, value),
-            });
+            if reporting {
+                // A delta, not a replacement: the story knows the one arg it
+                // just changed and nothing about the rest of the set.
+                write_channel.emit(Event::RequestArgsUpdate {
+                    id: write_id.clone(),
+                    args: ArgMap::new().with(name, value),
+                });
+            } else {
+                // Copied *inside* the body: capturing a `mut` binding would
+                // make this closure `FnMut`, and `ArgsHandle` wants an `Fn`.
+                let mut local_args = local_args;
+                local_args.write().set(name, value);
+            }
         })
     });
 
     let prepare_channel = channel.clone();
     let prepare_id = id.clone();
     use_hook(|| {
-        prepare_channel.emit(Event::StoryPrepared {
-            id: prepare_id,
-            initial_args: story.base_args(),
-        });
+        if reporting {
+            prepare_channel.emit(Event::StoryPrepared {
+                id: prepare_id,
+                initial_args: story.base_args(),
+            });
+        }
     });
 
     let reporter = channel.clone();
-    use_effect(move || reporter.emit(Event::StoryRendered { id: id.clone() }));
+    use_effect(move || {
+        if reporting {
+            reporter.emit(Event::StoryRendered { id: id.clone() });
+        }
+    });
 
     // The story body is a fn pointer invoked right here, inside a live Dioxus
     // scope, because `rsx!` and `EventHandler::new` need one — and so do the
     // decorators wrapped around it, which is the other reason this is a
     // component rather than a few lines in `Preview`.
-    story.render_decorated(project, &args, &globals)
+    // The local overlay is empty on the canvas, where nothing writes to it.
+    let args = args.overlay(&local_args());
+    story.render_decorated(project, &args, &globals, view)
 }
 
 #[component]

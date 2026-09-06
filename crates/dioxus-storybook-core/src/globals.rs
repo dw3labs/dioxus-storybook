@@ -10,8 +10,8 @@
 //!
 //! | | changes at run time | scope | declared by |
 //! |---|---|---|---|
-//! | [`ArgValue`](crate::ArgValue) args | yes | one story | the props type |
-//! | [`ParamValue`](crate::ParamValue) parameters | no | a level | project / meta / story |
+//! | [`ArgValue`] args | yes | one story | the props type |
+//! | [`ParamValue`] parameters | no | a level | project / meta / story |
 //! | **globals** | yes | the whole book | the project |
 //!
 //! Globals reuse the *args* machinery rather than growing a fourth one: a

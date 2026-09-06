@@ -26,6 +26,7 @@
 
 use dioxus_core::Element;
 
+use crate::docs::Autodocs;
 use crate::viewport::{self, Viewport, ViewportSelection};
 use crate::{ArgMap, ArgType, GlobalType};
 
@@ -200,6 +201,37 @@ impl ResolvedParameters {
 /// top to bottom walks inwards towards the story.
 pub type Decorator = fn(&StoryContext, Element) -> Element;
 
+/// Which surface a story is being rendered on.
+///
+/// A decorator that paints the whole surface — a theme background, a full-bleed
+/// layout — has to know, because the two surfaces are different shapes. The
+/// canvas is a document the story owns: `min-height:100vh` there fills the
+/// frame exactly. A docs page is a column with a dozen examples stacked in it,
+/// and the same rule makes each one a screen tall.
+///
+/// ```
+/// # use dioxus_storybook_core::{StoryContext, StoryView};
+/// # fn f(ctx: &StoryContext) -> &'static str {
+/// // The canvas is the story's whole document; a docs example is a box on a page.
+/// match ctx.view() {
+///     StoryView::Docs => "min-height:0",
+///     _ => "min-height:100vh",
+/// }
+/// # }
+/// ```
+///
+/// `#[non_exhaustive]`: a decorator matching on it needs a wildcard arm, which
+/// is also the arm that should treat anything unfamiliar as the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum StoryView {
+    /// The story canvas: one story, alone in the preview document.
+    #[default]
+    Canvas,
+    /// A generated docs page: many stories, stacked in a scrolling column.
+    Docs,
+}
+
 /// What a decorator is told about the story it is wrapping.
 ///
 /// `#[non_exhaustive]` and built only by this crate, so that growing it — as M3
@@ -214,6 +246,7 @@ pub struct StoryContext {
     parameters: ResolvedParameters,
     globals: ArgMap,
     viewport: Option<ViewportSelection>,
+    view: StoryView,
 }
 
 impl StoryContext {
@@ -267,6 +300,14 @@ impl StoryContext {
     pub const fn viewport(&self) -> Option<ViewportSelection> {
         self.viewport
     }
+
+    /// Which surface this story is being rendered on.
+    ///
+    /// See [`StoryView`] — the case that matters is a decorator sizing itself
+    /// against the viewport.
+    pub const fn view(&self) -> StoryView {
+        self.view
+    }
 }
 
 /// Configuration that applies to every story in the book.
@@ -287,14 +328,15 @@ pub struct Project {
     parameters: Parameters,
     globals: &'static [GlobalType],
     viewports: &'static [Viewport],
+    autodocs: Autodocs,
 }
 
 /// The same thing [`Project::new`] builds, so a storybook mounted without a
 /// project and one mounted with `Project::new()` are the same storybook.
 ///
 /// Written out rather than derived because they would otherwise differ: a
-/// derived `Default` gives an empty viewport list, and `new` gives the built-in
-/// one.
+/// derived `Default` gives an empty viewport list and `Autodocs::default()`,
+/// and `new` gives the built-in viewports.
 impl Default for Project {
     fn default() -> Self {
         Self::new()
@@ -309,6 +351,7 @@ impl Project {
             parameters: Parameters::new(),
             globals: &[],
             viewports: viewport::DEFAULT_VIEWPORTS,
+            autodocs: Autodocs::Always,
         }
     }
 
@@ -374,6 +417,27 @@ impl Project {
         crate::globals::resolve(self.globals, selected)
     }
 
+    /// Which components get a generated docs page.
+    ///
+    /// Defaults to [`Autodocs::Always`] — every component with a story. Set it
+    /// to [`Autodocs::Tagged`] for Storybook's own rule, where a component opts
+    /// in with `story_meta! { tags: ["autodocs"] }`.
+    ///
+    /// ```
+    /// # use dioxus_storybook_core::{Project, docs::Autodocs};
+    /// static PROJECT: Project = Project::new().with_autodocs(Autodocs::Tagged);
+    /// ```
+    #[must_use]
+    pub const fn with_autodocs(mut self, autodocs: Autodocs) -> Self {
+        self.autodocs = autodocs;
+        self
+    }
+
+    /// Which components get a generated docs page.
+    pub const fn autodocs(&self) -> Autodocs {
+        self.autodocs
+    }
+
     /// The project-level parameters.
     pub const fn parameters(&self) -> Parameters {
         self.parameters
@@ -388,6 +452,7 @@ impl Project {
 pub struct Meta {
     title: &'static str,
     component: &'static str,
+    description: &'static str,
     tags: &'static [&'static str],
     parameters: Parameters,
     decorators: &'static [Decorator],
@@ -399,10 +464,24 @@ impl Meta {
         Self {
             title,
             component,
+            description: "",
             tags: &[],
             parameters: Parameters::new(),
             decorators: &[],
         }
+    }
+
+    /// Attach the prose shown at the top of the component's docs page.
+    ///
+    /// `story_meta! { description: ".." }`. Optional: with none, the docs page
+    /// falls back to the `///` doc comment on the props type, which
+    /// `#[derive(Controls)]` captures. This exists because a proc macro cannot
+    /// read the *component function's* doc comment — it only ever sees the
+    /// tokens it was invoked on.
+    #[must_use]
+    pub const fn with_description(mut self, description: &'static str) -> Self {
+        self.description = description;
+        self
     }
 
     /// Attach tags inherited by every story in the module.
@@ -446,6 +525,14 @@ impl Meta {
         self.tags
     }
 
+    /// The prose for the component's docs page, or `""`.
+    ///
+    /// See [`with_description`](Self::with_description) for what fills in when
+    /// this is empty.
+    pub const fn description(&self) -> &'static str {
+        self.description
+    }
+
     /// Parameters inherited by every story in the module.
     pub const fn parameters(&self) -> Parameters {
         self.parameters
@@ -462,6 +549,9 @@ pub struct StoryDef {
     render: fn(&ArgMap) -> Element,
     arg_types: fn() -> &'static [ArgType],
     base_args: fn() -> ArgMap,
+    docs: &'static str,
+    source: &'static str,
+    component_docs: &'static str,
     tags: &'static [&'static str],
     parameters: Parameters,
     decorators: &'static [Decorator],
@@ -490,6 +580,9 @@ impl StoryDef {
             render,
             arg_types: no_arg_types,
             base_args: ArgMap::new,
+            docs: "",
+            source: "",
+            component_docs: "",
             tags: &[],
             parameters: Parameters::new(),
             decorators: &[],
@@ -508,6 +601,36 @@ impl StoryDef {
     #[must_use]
     pub const fn with_base_args(mut self, base_args: fn() -> ArgMap) -> Self {
         self.base_args = base_args;
+        self
+    }
+
+    /// Attach the story's own `///` doc comments, shown beside it on the docs
+    /// page.
+    #[must_use]
+    pub const fn with_docs(mut self, docs: &'static str) -> Self {
+        self.docs = docs;
+        self
+    }
+
+    /// Attach the story's body as the author wrote it.
+    ///
+    /// `#[story]` fills this in from the source text of the function body, so
+    /// the snippet on the docs page is the code in the file — formatting,
+    /// comments and all — and not a re-rendering of its token stream.
+    #[must_use]
+    pub const fn with_source(mut self, source: &'static str) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Attach the `///` doc comment on the props type.
+    ///
+    /// `#[story]` fills this in from `<P as Controllable>::DOCS` for a
+    /// props-form story. It is the docs page's fallback description, for the
+    /// common case where the props struct is where the component is explained.
+    #[must_use]
+    pub const fn with_component_docs(mut self, docs: &'static str) -> Self {
+        self.component_docs = docs;
         self
     }
 
@@ -567,6 +690,24 @@ impl StoryDef {
         self.tags
     }
 
+    /// The story's own `///` doc comments, or `""`.
+    pub const fn docs(&self) -> &'static str {
+        self.docs
+    }
+
+    /// The story's body, as written, or `""` when the source was unavailable.
+    ///
+    /// Unavailable means the story itself came out of another macro: a span
+    /// with no file behind it has no source text to quote.
+    pub const fn source(&self) -> &'static str {
+        self.source
+    }
+
+    /// The `///` doc comment on this story's props type, or `""`.
+    pub const fn component_docs(&self) -> &'static str {
+        self.component_docs
+    }
+
     /// Parameters on this story.
     pub const fn parameters(&self) -> Parameters {
         self.parameters
@@ -620,7 +761,13 @@ impl StoryDef {
     /// `globals` is the *selected* set; the declared defaults are filled in
     /// here, so a caller may pass an empty map and a decorator still sees every
     /// global the project declares.
-    pub fn context(&self, project: Project, args: &ArgMap, globals: &ArgMap) -> StoryContext {
+    pub fn context(
+        &self,
+        project: Project,
+        args: &ArgMap,
+        globals: &ArgMap,
+        view: StoryView,
+    ) -> StoryContext {
         let parameters = self.resolved_parameters(project);
         StoryContext {
             id: self.id(),
@@ -633,6 +780,7 @@ impl StoryDef {
             // means "whatever this story asked for", which is a different
             // answer from a viewport global set to `responsive`.
             viewport: viewport::resolve(project.viewports(), globals, parameters),
+            view,
         }
     }
 
@@ -649,13 +797,14 @@ impl StoryDef {
         project: Project,
         args: &ArgMap,
         globals: &ArgMap,
+        view: StoryView,
     ) -> Element {
         let chain = self
             .decorators
             .iter()
             .chain(self.meta.decorators())
             .chain(project.decorators());
-        let context = self.context(project, args, globals);
+        let context = self.context(project, args, globals, view);
         let mut element = self.render(args);
         for decorate in chain {
             element = decorate(&context, element);

@@ -658,3 +658,109 @@ fn the_picker_is_there_by_default_and_gone_when_the_project_offers_no_sizes() {
     assert!(!manager.contains(r#"class="dxsb-stage sized""#), "got: {manager}");
     assert!(none.preview_html().contains(r#"class="vp-responsive""#));
 }
+
+// ------------------------------------------------------------- M4: the docs page
+
+/// A docs page needed nothing new on the wire. Injecting the *same*
+/// `SetCurrentStory` a story uses, with a docs id in it, moves the preview onto
+/// the documentation — which is the claim that autodocs is an entry in the
+/// existing id space rather than a second mode.
+#[test]
+fn a_docs_id_travels_as_an_ordinary_story_selection() {
+    static WITH_DOCS: &[&StoryDef] = &[&PRIMARY, &DANGER, &CARD];
+    let mut docs = Documents::new(WITH_DOCS);
+
+    docs.bus.inject(
+        ViewMode::Manager,
+        Event::SetCurrentStory { id: "forms-button--docs".into() },
+    );
+    docs.settle();
+
+    let html = docs.preview_html();
+    assert!(
+        html.contains(r#"class="dxsb-docs""#),
+        "the preview should be showing the docs page: {html}"
+    );
+    // Every story of that component is on it, and the Layout/Card one is not.
+    assert!(html.contains("primary-body"), "got: {html}");
+    assert!(html.contains("danger-body"), "got: {html}");
+    assert!(!html.contains("card-body"), "a different component leaked in: {html}");
+}
+
+/// The docs page mounts several stories at once, so it must not report them.
+/// Otherwise the status bar names whichever mounted last and the controls panel
+/// is seeded from an arbitrary story.
+#[test]
+fn stories_on_a_docs_page_do_not_announce_themselves() {
+    let mut docs = Documents::new(ALL);
+    // Startup put the landing story on the canvas and it announced itself,
+    // correctly. Only what happens *after* the switch is the claim here.
+    docs.bus.traffic.borrow_mut().clear();
+    docs.bus.inject(
+        ViewMode::Manager,
+        Event::SetCurrentStory { id: "forms-button--docs".into() },
+    );
+    docs.settle();
+
+    let from_preview = docs.bus.sent_by(ViewMode::Preview);
+    assert!(
+        !from_preview.is_empty() || docs.preview_html().contains("dxsb-docs"),
+        "the switch should have done something"
+    );
+    let announced: Vec<&Event> = from_preview
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Event::StoryRendered { id } | Event::StoryPrepared { id, .. }
+                    if id.starts_with("forms-button--") && !id.ends_with("--docs")
+            )
+        })
+        .collect();
+    assert!(
+        announced.is_empty(),
+        "a docs example reported itself to the shell: {announced:?}"
+    );
+    assert!(
+        !from_preview.iter().any(|e| matches!(e, Event::StoryMissing { .. })),
+        "a docs id is not a missing story: {from_preview:?}"
+    );
+}
+
+/// The toggle is drawn from the manager's side only, so this asserts on the
+/// shell's markup — and on `class="..."` rather than a bare substring, because
+/// the manager document contains the whole stylesheet as text.
+#[test]
+fn the_shell_offers_a_canvas_docs_toggle() {
+    let docs = Documents::new(ALL);
+    let html = docs.manager_html();
+    assert!(html.contains(r#"class="dxsb-docstoggle""#), "got: {html}");
+    assert!(html.contains(">Canvas</button>"), "got: {html}");
+    assert!(html.contains(">Docs</button>"), "got: {html}");
+}
+
+/// With autodocs off there is no page to reach and no control offering one.
+#[test]
+fn autodocs_never_removes_the_toggle_and_the_page() {
+    use dioxus_storybook_core::{Autodocs, Project};
+    static NO_DOCS: Project = Project::new().with_autodocs(Autodocs::Never);
+
+    let mut docs = Documents::with_project(ALL, NO_DOCS);
+    assert!(
+        !docs.manager_html().contains(r#"class="dxsb-docstoggle""#),
+        "the toggle should be gone entirely"
+    );
+
+    docs.bus.inject(
+        ViewMode::Manager,
+        Event::SetCurrentStory { id: "forms-button--docs".into() },
+    );
+    docs.settle();
+    assert!(
+        docs.bus
+            .sent_by(ViewMode::Preview)
+            .iter()
+            .any(|e| matches!(e, Event::StoryMissing { id } if id == "forms-button--docs")),
+        "with autodocs off, a docs id really is a missing story"
+    );
+}

@@ -20,6 +20,8 @@
 //! [`Channel`]: dioxus_storybook_core::Channel
 
 use dioxus::prelude::*;
+
+use crate::inline::Doc;
 use dioxus_storybook_core::{ArgMap, ArgType, ArgValue, Control};
 
 /// One line in the actions log.
@@ -60,6 +62,12 @@ pub fn AddonPanel(
     overrides: ArgMap,
     actions: Vec<ActionEntry>,
     tab: PanelTab,
+    /// Whether a docs page is showing rather than a story.
+    ///
+    /// The panel stays — the actions log is still live, because the examples on
+    /// a docs page are real stories — but "no props table" would be the wrong
+    /// explanation for why the controls are gone.
+    on_docs: bool,
     open: bool,
     on_tab: EventHandler<PanelTab>,
     on_toggle: EventHandler<()>,
@@ -132,7 +140,7 @@ pub fn AddonPanel(
                 div { class: "dxsb-panelbody",
                     match tab {
                         PanelTab::Controls => rsx! {
-                            ControlsTable { arg_types, initial, overrides, on_set, on_unset }
+                            ControlsTable { arg_types, initial, overrides, on_docs, on_set, on_unset }
                         },
                         PanelTab::Actions => rsx! {
                             ActionsLog { actions }
@@ -150,9 +158,20 @@ fn ControlsTable(
     arg_types: &'static [ArgType],
     initial: ArgMap,
     overrides: ArgMap,
+    on_docs: bool,
     on_set: EventHandler<(String, ArgValue)>,
     on_unset: EventHandler<String>,
 ) -> Element {
+    if on_docs {
+        return rsx! {
+            p { class: "dxsb-panelempty",
+                "A docs page has no controls: it shows every story of a component at its own "
+                "defaults, and the props table is on the page itself. Switch to "
+                strong { "Canvas" }
+                " to drive one story."
+            }
+        };
+    }
     if arg_types.is_empty() {
         return rsx! {
             p { class: "dxsb-panelempty",
@@ -384,7 +403,9 @@ fn ControlRow(
                 }
                 span { class: "dxsb-optional", "{optional}" }
                 if !arg.docs.is_empty() {
-                    span { class: "dxsb-propdocs", "{arg.docs}" }
+                    span { class: "dxsb-propdocs",
+                        Doc { text: arg.docs.to_string() }
+                    }
                 }
             }
             td { class: "dxsb-ctrlwidget", {widget} }

@@ -9,6 +9,10 @@ story_meta! {
     component: Badge,
 }
 
+// No `description:` here on purpose: the docs page falls back to the `///` on
+// `BadgeProps`, so a component is documented without anyone writing a word of
+// storybook-specific prose.
+
 fn base() -> BadgeProps {
     BadgeProps {
         text: "New".into(),

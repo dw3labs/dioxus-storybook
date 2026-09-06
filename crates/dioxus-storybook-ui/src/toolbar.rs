@@ -1,4 +1,5 @@
-//! The toolbar addons: the globals bar and the viewport picker.
+//! The toolbar addons: the Canvas/Docs toggle, the globals bar and the viewport
+//! picker.
 //!
 //! Manager-side, like every other addon surface: both edit the manager's
 //! globals signal, which goes out on the [`Channel`] as
@@ -24,6 +25,48 @@
 use dioxus::prelude::*;
 use dioxus_storybook_core::viewport::RESPONSIVE;
 use dioxus_storybook_core::{ArgMap, ArgValue, Control, GlobalType, Viewport, ViewportSelection};
+
+/// The Canvas / Docs toggle, or nothing when this component has no docs page.
+///
+/// It is a pair of buttons and not a link, but what it actually does is change
+/// the selected **id**: a docs page is an entry in the same id space a story is,
+/// so switching to it goes through the same signal, the same URL parameter and
+/// the same wire message as walking the sidebar. That is the whole reason there
+/// is no `viewMode=docs` here to match Storybook's — the id already says it.
+#[component]
+pub fn DocsToggle(
+    /// The docs entry id, or `None` when this component has no docs page.
+    docs_id: Option<String>,
+    /// The story the Canvas button lands on, or `None` when the component has
+    /// none — which cannot happen for a resolved docs page, but the signature
+    /// should not have to promise that.
+    canvas_id: Option<String>,
+    /// Whether the docs page is what is currently showing.
+    on_docs: bool,
+    on_pick: EventHandler<String>,
+) -> Element {
+    let (Some(docs_id), Some(canvas_id)) = (docs_id, canvas_id) else {
+        return rsx! {};
+    };
+    rsx! {
+        div { class: "dxsb-docstoggle", role: "tablist",
+            button {
+                class: if on_docs { "dxsb-docstab" } else { "dxsb-docstab active" },
+                role: "tab",
+                aria_selected: !on_docs,
+                onclick: move |_| on_pick.call(canvas_id.clone()),
+                "Canvas"
+            }
+            button {
+                class: if on_docs { "dxsb-docstab active" } else { "dxsb-docstab" },
+                role: "tab",
+                aria_selected: on_docs,
+                onclick: move |_| on_pick.call(docs_id.clone()),
+                "Docs"
+            }
+        }
+    }
+}
 
 /// One control per declared global, or nothing at all when none are declared.
 #[component]

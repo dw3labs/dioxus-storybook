@@ -8,9 +8,10 @@
 //! # Why a hand-rolled format
 //!
 //! [`Event`] is a closed vocabulary of nine messages whose payloads are strings
-//! and [`ArgMap`]s, and `ArgMap` already has a tested textual encoding — the one
-//! the URL uses. Pulling in `serde` + a JSON codec to move nine tags would add
-//! two dependencies to a crate that currently has one, for no capability.
+//! and [`ArgMap`](crate::ArgMap)s, and `ArgMap` already has a tested textual
+//! encoding — the one the URL uses. Pulling in `serde` + a JSON codec to move
+//! nine tags would add two dependencies to a crate that currently has one, for
+//! no capability.
 //!
 //! # Format
 //!
