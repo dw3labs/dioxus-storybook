@@ -9,7 +9,8 @@ PROJECT   A native Storybook for Dioxus: a component workbench where each
 STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
           M1 (walking skeleton) COMPLETE — browse + render + URL state.
           M2 (controls & actions) COMPLETE — the workbench is editable.
-          M3 (isolation, globals, environment) NOT STARTED.
+          M3 (isolation, globals, environment) IN PROGRESS — 3 of 6 items done:
+            the iframe split, decorators + parameters, panic reporting.
 SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
 NAME      dioxus-storybook · MIT · (c) DW3Labs
 TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
@@ -19,31 +20,42 @@ TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
  HOT — what happens next
 --------------------------------------------------------------------------------
 
-NOTHING IS BLOCKED. M2 shipped in session 0004: controls panel, actions panel,
-use_args write-back, Vec<T> args, and a scope per story.
+NOTHING IS BLOCKED. Session 0005 shipped the biggest slice of M3: the preview
+now renders in an IFRAME, as its own document, over a postMessage transport.
 
-NEXT UP (M3 — isolation, globals & environment, ~2-3 weeks).
-  [ ] Split manager and preview into TWO wasm bundles + a postMessage Channel
-      impl. M2 was written for this: no addon reads a preview signal, the
-      manager never evaluates a story, and every Event carries owned data.
-      FIRST QUESTION: does the manager bundle still link the registry? If yes,
-      ArgType can stay `&'static` on both sides and nothing needs a DTO. If no,
-      Control::Select's `&'static [&'static str]` needs an owned mirror.
-  [ ] Decorators at 3 levels (global -> component -> story, outermost first).
-  [ ] Parameters with merge semantics. The types exist; the merge does not.
-  [ ] Globals + toolbar.
-  [ ] viewport / backgrounds / measure / outline addons.
-  [ ] Error boundary reporting panics to the manager.
-  [ ] MEASURE FIRST: Callback::new runs once per action prop PER RENDER inside
-      wire_actions, and story bodies already did the same in M1. Entries free
-      only when StoryHost remounts. Bounded, but drag a slider and find out.
-      See LOG-0004 "Known issue for M3".
+THE FIRST QUESTION IS ANSWERED. "Does the manager bundle still link the
+registry?" — YES, because there is only one bundle. The manager points its
+iframe at its OWN URL with `?viewMode=preview`; the same wasm loads twice and
+each copy renders a different half. So ArgType stays `&'static` on both sides
+and nothing on the wire needed a DTO. See LOG-0005 / F1.
+
+DONE IN M3 SO FAR
+  [x] Manager/preview split + postMessage Channel. No addon changed.
+  [x] Decorators at 3 levels (project -> component -> story, outermost first).
+  [x] Parameters with merge semantics (ResolvedParameters, innermost wins).
+  [x] Panic reporting: the preview's panic hook posts Event::PreviewPanicked,
+      the shell shows it with a "Reload the preview" button.
+
+NEXT UP (the rest of M3)
+  [ ] Globals + toolbar. Storybook's "globals" are toolbar-selected values
+      (theme, locale) that every story sees. They belong on the wire and in
+      StoryContext — which is #[non_exhaustive] and was built to grow this way.
+  [ ] viewport / backgrounds / measure / outline addons. These are the first
+      real consumers of ResolvedParameters, which nothing reads yet. `viewport`
+      is nearly free now: the preview is a frame whose width the shell owns.
+  [ ] ErrorBoundary for Element-level errors. DISTINCT from the panic hook,
+      which is done. `ErrorBoundary` catches a story returning `Err`; it cannot
+      catch a panic, because wasm here is panic="abort".
+  [ ] MEASURE FIRST (carried from LOG-0004): Callback::new runs once per action
+      prop PER RENDER inside wire_actions. Entries free only when StoryHost
+      remounts. Bounded, but drag a slider and find out.
 
 READY TO RUN:
-  cargo test --workspace                       67 tests + 10 doctests, all green
-  rust-analyzer diagnostics .                  MUST stay clean — see standing facts
-  cd examples/button-gallery && dx serve --platform web    14 stories
-  cargo package -p dioxus-storybook-core       verifies the publish metadata
+  cargo test --workspace                      130 tests + 11 doctests, all green
+  rust-analyzer diagnostics .                 MUST stay clean — see standing facts
+  cd examples/button-gallery && dx serve --platform web    15 stories
+  cargo package -p dioxus-storybook-core      verifies the publish metadata
+  cd spikes/s4-iframe && dx serve --platform web           the M3 spike
 
 SMALL FOLLOW-UPS (unblocked, do any time):
   [ ] File upstream dx issue: `dx serve --hot-patch` fails on wasm with
@@ -51,37 +63,53 @@ SMALL FOLLOW-UPS (unblocked, do any time):
   [ ] Publish order when the time comes: core -> macro -> build -> ui -> facade.
   [ ] A real list widget for Vec<T>. Today it is a comma-separated text box.
       Control is #[non_exhaustive], so adding one is not breaking.
-  [ ] AT M5, re-check CSP. dioxus-web links `new Function` (document.rs:220,
-      WebEvaluator::create = document::eval) into every binary, so a strict CSP
-      without unsafe-eval would break it. Nothing here calls document::eval, so
-      a static build is fine today. Measured in session 0004: our app serves no
-      CSP header and no CSP meta tag.
+  [ ] AT M5, re-check CSP. dioxus-web links `new Function` into every binary, so
+      a strict CSP without unsafe-eval would break it. Measured in 0004: our app
+      serves no CSP header and no CSP meta tag. The iframe adds nothing here —
+      it is same-origin and carries no sandbox attribute.
+  [ ] The preview document has no `<title>` of its own. Harmless, but a framed
+      document showing up in a11y trees as untitled is worth 5 minutes at M6.
 
-STILL OPEN (neither blocks M3):
+STILL OPEN (neither blocks the rest of M3):
   D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
       for rigour? Cannot do both first.
   D4  Is `dx serve --platform desktop` in scope at all, or web-only forever?
+      NOTE: M3 raised the cost of a yes. The split assumes a document boundary;
+      desktop has no iframe, so it would need the InProcessChannel path back.
 
 DO NOT DO:
   - Do not reach for `linkme` or `inventory` for the story registry. Both were
     tested and both fail on wasm. See LOG-0002 / S2 before revisiting.
   - Do not pass `--hot-patch` to dx serve. It does not build.
-  - Do not let the MANAGER call StoryDef::base_args(). It needs a live scope and
-    at M3 the story fns are in the other bundle. The preview publishes them as
-    Event::StoryPrepared. See LOG-0004 / F1.
+  - Do not split the manager and preview into two CRATES/BUNDLES. It was the
+    plan and it is worse: two builds, a hand-written iframe.html, and a manager
+    that can no longer see the registry it needs for the sidebar and the props
+    tables. One bundle loaded twice gives the same isolation. LOG-0005 / F1.
+  - Do not add a `_ =>` wildcard arm to `wire::encode`. `Event` is
+    #[non_exhaustive] for downstream crates but exhaustive inside core, so a new
+    variant FAILS TO COMPILE until it is given a wire form. That is the only
+    thing stopping a new message from silently going nowhere.
+  - Do not make the iframe's `src` track live state. Changing `src` reloads the
+    frame; it is computed once at mount and only the reload button touches it.
+  - Do not let either half act on its own messages. InProcessChannel broadcasts
+    to the emitter too; postMessage does not. tests/two_documents.rs holds the
+    line — its harness deliberately has the stricter behaviour.
+  - Do not let the MANAGER call StoryDef::base_args() or render a decorator.
+    Both need a live scope and a story, and the manager has neither. The preview
+    publishes defaults as Event::StoryPrepared. See LOG-0004 / F1.
   - Do not render a story body inline in the preview again. Stories get their
     own scope via StoryHost, remounted per story. See LOG-0004 / F2.
   - Do not "simplify" the one-element `for def in [def]` loop around StoryHost
     into a plain child. Dioxus only honours `key` when diffing a LIST; a lone
     keyed child is re-rendered in place and the hook bug comes back.
   - Do not add a controls panel that mutates the preview's args signal directly.
-    Route it through the Channel or M3's iframe split will require a rewrite.
+    Route it through the Channel.
   - Do not emit a `macro_rules!` from one proc macro for another to call with a
     value argument. It compiles and it breaks rust-analyzer. See standing facts.
   - Do not construct StoryDef/Meta with struct literals. Fields are private on
     purpose; use the const builders so adding a field stays non-breaking.
   - Do not put ArgType on the wire. It holds &'static str; the manager reads the
-    const table directly instead.
+    const table directly instead — which works because it shares the bundle.
   - Do not create a signal in a CHILD scope that an ANCESTOR's code writes. The
     channel listener runs in the emitter's scope, so preview signals written by
     the manager must be Signal::new_in_scope(.., ScopeId::ROOT). See LOG-0004/F8.
@@ -117,6 +145,14 @@ DO NOT DO:
                                                hook-order bug: stories
                                                now get their own scope.
 
+0005  2026-09-06  M3 pt 1: isolation,          Preview moved into an    log/0005-m3-isolation.md
+                  decorators, parameters       iframe over postMessage.
+                                               ONE bundle, not two —
+                                               the plan was wrong.
+                                               Decorators + parameter
+                                               merge + panic reporting.
+                                               130 tests.
+
 
 --------------------------------------------------------------------------------
  STANDING FACTS  (things that cost time to learn — do not re-derive)
@@ -131,8 +167,38 @@ BUILD / SERVE
     `dx serve --platform web`. Incremental rebuild is ~1.5s, which is enough.
   * `spikes/s1-hotreload` is EXCLUDED from the cargo workspace. You must `cd`
     into it; `--package s1-hotreload` from the root will not find it.
+  * `dx serve` does NOT pick up changes to a path dependency under `crates/`,
+    and does NOT re-run build.rs when a NEW story file appears. Restart it.
+    Cost measured in session 0005: a full restart-and-build is ~20-25s.
+  * dx serves index.html for `/` with ANY query string, so an iframe pointed at
+    `?viewMode=preview` loads the same bundle with no extra file and no config.
+
+BROWSER / IFRAME  (session 0005)
+  * `window.parent` IS `window` when a document is not framed. A preview opened
+    directly would post to itself and answer its own messages, which is why the
+    sender's ViewMode is on the wire and a reader only accepts its peer.
+  * `window.onmessage` is a SHARED bus. Browser extensions post at it — a wallet
+    extension showed up in the console on the very first run. Every message
+    needs a magic prefix and everything else must be dropped unparsed.
+  * A plain JS callback (no Dioxus scope, no runtime guard) CAN write a Signal
+    and the owning component re-renders. Verified in spikes/s4-iframe before any
+    of the real transport was written.
+  * A percentage height does not resolve through the host app's mount element.
+    `div#main` has auto height, so `min-height:100%` in the preview stylesheet
+    collapsed. Use `100vh` — a framed stylesheet cannot know what it is inside.
+  * `std::panic::set_hook` requires `Send + Sync`, which an `Rc`-based channel
+    is not. A hook that captures NOTHING and looks `web_sys::window()` up afresh
+    satisfies the bound. Chain the previous hook or you lose Dioxus's console
+    output. The hook DOES run under `panic = "abort"` — then the module is gone.
 
 RUST / DIOXUS GOTCHAS
+  * `use_effect` DOES NOT RUN under a bare `VirtualDom`. `rebuild_in_place` and
+    `render_immediate_to_vec` never fire one; `VirtualDom::process_events()`
+    does, but only once there are no dirty scopes. A headless test pass is
+    therefore render -> process_events -> deliver. This is not just a test
+    detail: it is why the preview's `PreviewReady` handshake is a `use_hook`
+    placed after its `subscribe` hook, not an effect. Ordering WITHIN a
+    component is enough and needs no renderer.
   * `key` is ONLY consulted when diffing a LIST (`diff_keyed_children`). A lone
     keyed child in a fixed template position goes through `diff_node`, which
     never looks at it — so a changing key there does NOT remount. To force a
@@ -205,13 +271,17 @@ PROJECT STRUCTURE
   * `#[non_exhaustive]` has no effect inside its own crate — our own matches
     stay exhaustive, and a wildcard arm there is an unreachable-pattern warning.
 
-TESTING TRAPS (both produced convincing WRONG answers — see LOG-0002)
+TESTING TRAPS (all produced convincing WRONG answers)
   * LTO const-folds a static registry into a literal. A registry test that just
     counts entries can pass while proving nothing. Use `black_box` and read real
     string bytes out of linear memory.
   * macOS `sed -i ''` writes a sibling temp file (`.!PID!name.rs`). dx's file
     watcher latches onto THAT, not your file. Never use it to script an edit for
     a hot-reload measurement; write in place instead.
+  * A substring assertion can pass for the wrong reason. `story_bodies_are_
+    invoked_in_scope` asserted the shell contained "ok" — and "dioxus-storybook"
+    contains "ok". It kept passing after the story moved to another document.
+    Assert on a marker that could not appear by accident. (LOG-0005 / F7.)
 
 
 --------------------------------------------------------------------------------

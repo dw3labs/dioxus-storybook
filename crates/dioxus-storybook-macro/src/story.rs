@@ -44,6 +44,83 @@ use syn::{Ident, ItemFn, LitStr, ReturnType, Token, Type};
 
 use crate::{core_path, dioxus_path};
 
+/// One `key: value` pair inside a `parameters { .. }` block.
+///
+/// Keys may be written bare (`layout: "centered"`) or quoted, because a
+/// parameter name is a string at run time and addons are free to use ones that
+/// are not Rust identifiers.
+struct Param {
+    key: String,
+    value: TokenStream,
+}
+
+/// Parse `{ layout: "centered", padding: 16.0, docs: false }`.
+fn parse_parameters(input: ParseStream) -> syn::Result<Vec<Param>> {
+    let content;
+    syn::braced!(content in input);
+    let core = core_path();
+    let mut out = Vec::new();
+    while !content.is_empty() {
+        let key = if content.peek(LitStr) {
+            content.parse::<LitStr>()?.value()
+        } else {
+            content.parse::<Ident>()?.to_string()
+        };
+        content.parse::<Token![:]>()?;
+        let lit: syn::Lit = content.parse()?;
+        let value = match &lit {
+            syn::Lit::Str(s) => quote!(#core::ParamValue::Str(#s)),
+            syn::Lit::Bool(b) => quote!(#core::ParamValue::Bool(#b)),
+            syn::Lit::Float(f) => quote!(#core::ParamValue::Num(#f)),
+            syn::Lit::Int(i) => {
+                // Written as an integer, stored as the `f64` every other number
+                // parameter is, so `padding: 16` and `padding: 16.0` mean the
+                // same thing to an addon.
+                let as_f64 = i.base10_parse::<i64>()? as f64;
+                quote!(#core::ParamValue::Num(#as_f64))
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "a parameter value must be a string, number or bool",
+                ));
+            }
+        };
+        out.push(Param { key, value });
+        if content.peek(Token![,]) {
+            content.parse::<Token![,]>()?;
+        }
+    }
+    Ok(out)
+}
+
+/// Parse `[with_theme, padded]` — paths to `Decorator` fn items or closures.
+fn parse_decorators(input: ParseStream) -> syn::Result<Vec<syn::Expr>> {
+    let content;
+    syn::bracketed!(content in input);
+    let list = content.parse_terminated(<syn::Expr as Parse>::parse, Token![,])?;
+    Ok(list.into_iter().collect())
+}
+
+/// `Parameters::from_static(&[..])`, or nothing when there are none.
+fn parameters_expr(params: &[Param]) -> TokenStream {
+    let core = core_path();
+    if params.is_empty() {
+        return quote!(#core::Parameters::new());
+    }
+    let entries = params.iter().map(|Param { key, value }| quote!((#key, #value)));
+    quote!(#core::Parameters::from_static(&[ #(#entries),* ]))
+}
+
+/// `&[..]` of decorators, typed so a bare closure coerces to a `fn` pointer.
+fn decorators_expr(decorators: &[syn::Expr]) -> TokenStream {
+    let core = core_path();
+    quote!({
+        const __DXSB_DECORATORS: &[#core::Decorator] = &[ #(#decorators),* ];
+        __DXSB_DECORATORS
+    })
+}
+
 /// The identifier `story_meta!` defines and `#[story]` reads.
 fn meta_ident() -> Ident {
     Ident::new("__DXSB_META", Span::call_site())
@@ -61,6 +138,8 @@ pub struct MetaInput {
     component: Ident,
     props: Option<Type>,
     tags: Vec<LitStr>,
+    parameters: Vec<Param>,
+    decorators: Vec<syn::Expr>,
 }
 
 impl Parse for MetaInput {
@@ -69,6 +148,8 @@ impl Parse for MetaInput {
         let mut component: Option<Ident> = None;
         let mut props: Option<Type> = None;
         let mut tags: Vec<LitStr> = Vec::new();
+        let mut parameters: Vec<Param> = Vec::new();
+        let mut decorators: Vec<syn::Expr> = Vec::new();
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -84,11 +165,14 @@ impl Parse for MetaInput {
                         content.parse_terminated(<LitStr as Parse>::parse, Token![,])?;
                     tags = list.into_iter().collect();
                 }
+                "parameters" => parameters = parse_parameters(input)?,
+                "decorators" => decorators = parse_decorators(input)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
                         format!(
-                            "unknown story_meta key `{other}`; expected one of: title, component, props, tags"
+                            "unknown story_meta key `{other}`; expected one of: \
+                             title, component, props, tags, parameters, decorators"
                         ),
                     ));
                 }
@@ -116,6 +200,8 @@ impl Parse for MetaInput {
             component,
             props,
             tags,
+            parameters,
+            decorators,
         })
     }
 }
@@ -128,7 +214,11 @@ pub fn story_meta(input: MetaInput) -> TokenStream {
         component,
         props,
         tags,
+        parameters,
+        decorators,
     } = input;
+    let parameters = parameters_expr(&parameters);
+    let decorators = decorators_expr(&decorators);
 
     let component_name = component.to_string();
     let meta = meta_ident();
@@ -145,7 +235,9 @@ pub fn story_meta(input: MetaInput) -> TokenStream {
         #[doc(hidden)]
         pub const #meta: #core::Meta =
             #core::Meta::new(#title, #component_name)
-                .with_tags(&[ #(#tags),* ]);
+                .with_tags(&[ #(#tags),* ])
+                .with_parameters(#parameters)
+                .with_decorators(#decorators);
 
         /// Renders this module's component from its props. Generated by
         /// `story_meta!` so that `#[story]` never has to name the component.
@@ -162,6 +254,8 @@ pub fn story_meta(input: MetaInput) -> TokenStream {
 #[derive(Default)]
 pub struct StoryArgs {
     name: Option<LitStr>,
+    parameters: Vec<Param>,
+    decorators: Vec<syn::Expr>,
 }
 
 impl Parse for StoryArgs {
@@ -174,10 +268,23 @@ impl Parse for StoryArgs {
                     input.parse::<Token![=]>()?;
                     args.name = Some(input.parse()?);
                 }
+                // `=` before the block reads oddly in an attribute, so both
+                // `parameters { .. }` and `parameters = { .. }` are accepted.
+                "parameters" => {
+                    let _ = input.parse::<Token![=]>();
+                    args.parameters = parse_parameters(input)?;
+                }
+                "decorators" => {
+                    let _ = input.parse::<Token![=]>();
+                    args.decorators = parse_decorators(input)?;
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown #[story] argument `{other}`; expected `name = \"...\"`"),
+                        format!(
+                            "unknown #[story] argument `{other}`; expected one of: \
+                             name, parameters, decorators"
+                        ),
                     ));
                 }
             }
@@ -233,6 +340,8 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
         .name
         .map(|l| l.value())
         .unwrap_or_else(|| display_name(&fn_ident));
+    let parameters = parameters_expr(&args.parameters);
+    let decorators = decorators_expr(&args.decorators);
     let static_name = static_ident(&fn_ident);
 
     let ReturnType::Type(_, return_ty) = &func.sig.output else {
@@ -303,6 +412,11 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
                 #render_body
             })
             #extras
-            .with_tags(#meta.tags());
+            .with_tags(#meta.tags())
+            .with_parameters(#parameters)
+            .with_decorators(#decorators)
+            // Carries the component level whole, so the story can reach the
+            // parameters and decorators declared once in `story_meta!`.
+            .with_meta(#meta);
     }
 }

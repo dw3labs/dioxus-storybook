@@ -1,17 +1,35 @@
 //! The dioxus-storybook manager shell: sidebar, search, keyboard navigation,
 //! the preview harness, and URL state.
 //!
-//! # Two halves, one bundle — for now
+//! # Two documents, one bundle
 //!
-//! Storybook proper runs the manager and the preview as two documents talking
-//! over `postMessage`. M1 runs both in a single Dioxus app, but the manager
-//! never calls the preview directly: it emits [`Event`]s on a [`Channel`] and
-//! the preview subscribes. That indirection looks like ceremony today and is
-//! the whole point tomorrow — M3 swaps an iframe transport underneath without
-//! any component here changing.
+//! From M3 the story canvas lives in an **iframe**, so a component under test
+//! cannot reach the shell's DOM, cannot inherit its CSS, and cannot take the
+//! whole page down with it.
 //!
+//! The two halves are not two *bundles*, though. [`Storybook`] points its
+//! iframe at the same URL it is serving from, with `?viewMode=preview` added,
+//! and the copy that loads there sees the parameter and renders the canvas
+//! alone. One `dx build`, one wasm binary, two documents. The alternative —
+//! two crates and a hand-written `iframe.html` — costs a second compile of
+//! everything, and buys isolation this already has. It would also cut the
+//! manager off from the story registry, which it needs for the sidebar and for
+//! the props tables; sharing a binary keeps [`ArgType`] a `&'static` on both
+//! sides and keeps every message on the wire owned data.
+//!
+//! Nothing above the transport changed to make this work: the manager still
+//! only emits [`Event`]s on a [`Channel`], and the preview still only
+//! subscribes. That indirection, written in M1 when it looked like ceremony, is
+//! why M3 is a new `Channel` implementation rather than a rewrite.
+//!
+//! Off `wasm32` there is no iframe to make, so the shell renders the preview
+//! inline over an [`InProcessChannel`] and the whole thing stays assertable
+//! from a host test.
+//!
+//! [`ArgType`]: dioxus_storybook_core::ArgType
 //! [`Channel`]: dioxus_storybook_core::Channel
 //! [`Event`]: dioxus_storybook_core::Event
+//! [`InProcessChannel`]: dioxus_storybook_core::InProcessChannel
 
 #![deny(missing_docs)]
 
@@ -24,16 +42,21 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_storybook_core::{
-    ActionSink, ArgMap, ArgValue, ArgsHandle, Channel, Event, InProcessChannel, Registry, Row,
-    RowKind, StoryDef, UrlState, flatten,
+    ActionSink, ArgMap, ArgValue, ArgsHandle, Channel, ChannelHandle, Event, Project, Registry,
+    Row, RowKind, StoryDef, UrlState, ViewMode, flatten,
 };
 
 use panels::{ACTION_LOG_CAP, ActionEntry, AddonPanel, PanelTab};
 
-pub use style::MANAGER_CSS;
+pub use style::{MANAGER_CSS, PREVIEW_CSS};
 
 /// The id of the search input, so `/` can focus it.
 const SEARCH_ID: &str = "dxsb-search";
+
+/// The id of the preview iframe. The manager's transport looks the element up
+/// by this id every time it sends, because the frame is replaced outright when
+/// the preview reloads.
+const PREVIEW_FRAME_ID: &str = "dxsb-preview-frame";
 
 /// Which story to show on load: the one the URL names if it still exists,
 /// otherwise the first in the index.
@@ -49,7 +72,7 @@ fn landing_story(registry: Registry, requested: Option<&str>) -> Option<String> 
         .or_else(|| registry.first().map(StoryDef::id))
 }
 
-/// The storybook manager.
+/// The storybook.
 ///
 /// Mount it as your whole app:
 ///
@@ -58,11 +81,72 @@ fn landing_story(registry: Registry, requested: Option<&str>) -> Option<String> 
 ///     dioxus::launch(|| rsx! { Storybook { registry: stories::registry() } });
 /// }
 /// ```
+///
+/// # It is two things
+///
+/// This one component is both halves. Which one it renders is decided by the
+/// document's own URL: with `?viewMode=preview` it is the story canvas, alone;
+/// without, it is the shell, and the shell points an iframe back at the same
+/// URL *with* that parameter. See the [module docs](self).
+///
+/// The consequence worth knowing about: **a story renders in a document that
+/// has none of your app's CSS or assets in it.** Components that carry their
+/// own styles are unaffected; anything relying on a global stylesheet needs
+/// that stylesheet in the preview document too.
 #[component]
-pub fn Storybook(registry: Registry) -> Element {
-    // The bus. Provided as context so the preview — and, from M2, every addon
-    // panel — talks to the manager without either holding the other's signals.
-    let channel: InProcessChannel = use_context_provider(InProcessChannel::new);
+pub fn Storybook(registry: Registry, #[props(default)] project: Project) -> Element {
+    // Both read once, in hooks. A document does not change roles while it is
+    // running, and rebuilding the transport on every render would drop every
+    // subscription with it.
+    let mode = use_hook(browser::view_mode);
+    let channel = use_hook(|| browser::channel_for(mode, PREVIEW_FRAME_ID));
+
+    match mode {
+        ViewMode::Preview => rsx! { StorybookPreview { registry, channel, project } },
+        // `ViewMode` is `#[non_exhaustive]`, and an unrecognised mode is the
+        // shell for the same reason a bare URL is.
+        //
+        // The project is deliberately *not* passed here. Decorators render
+        // stories, and the shell renders none — reading them in this document
+        // would be the first crack in the split.
+        _ => rsx! { StorybookManager { registry, channel } },
+    }
+}
+
+/// The preview half on its own: the story canvas, and nothing around it.
+///
+/// [`Storybook`] mounts this for you in the framed document. Mount it yourself
+/// only if you are supplying your own transport — a test harness pairing the
+/// two halves, or an embedding that is not an iframe.
+#[component]
+pub fn StorybookPreview(
+    registry: Registry,
+    channel: ChannelHandle,
+    #[props(default)] project: Project,
+) -> Element {
+    // Provided as context so `Preview` and `StoryHost` — and, later, a
+    // preview-side addon — reach the bus without being handed it through every
+    // layer.
+    use_context_provider(|| channel);
+    use_hook(browser::report_panics_to_manager);
+
+    rsx! {
+        style { {PREVIEW_CSS} }
+        Preview { registry, project }
+    }
+}
+
+/// The manager half on its own: the shell, and the preview either framed
+/// (in a browser) or inline (anywhere else).
+///
+/// [`Storybook`] mounts this for you. See [`StorybookPreview`] for when you
+/// would reach for it directly.
+#[component]
+pub fn StorybookManager(registry: Registry, channel: ChannelHandle) -> Element {
+    // Provided as context so an addon panel — and the inline preview, where
+    // there is one — talks to the bus without either half holding the other's
+    // signals.
+    use_context_provider(|| channel.clone());
 
     // The URL is the only state that survives a rebuild, so it is the source of
     // truth at startup, not a mirror written afterwards.
@@ -91,6 +175,16 @@ pub fn Storybook(registry: Registry) -> Element {
     let mut tab = use_signal(|| PanelTab::Controls);
     let mut panel_open = use_signal(|| true);
 
+    // Bumped every time the preview announces itself. The publishing effect
+    // below reads it, so a preview that mounts late — or reloads on its own,
+    // which `dx serve` makes it do on every source edit — is resynced rather
+    // than left showing whatever its URL said.
+    let handshake = use_signal(|| 0usize);
+
+    // Set once, and never cleared by anything but a reload: after a panic the
+    // preview's wasm module is gone, so there is no "recovered" state to observe.
+    let mut dead = use_signal(|| None::<String>);
+
     // Listen to the preview's side of the conversation.
     // `Channel::subscribe` takes an `Fn`, so the signals are copied in rather
     // than captured by mutable reference — `Signal` is `Copy` for exactly this.
@@ -101,7 +195,19 @@ pub fn Storybook(registry: Registry) -> Element {
             let (mut rendered, mut stale) = (last_rendered, stale_link);
             let (mut initial_args, mut args) = (initial_args, args);
             let (mut actions, mut seq) = (actions, action_seq);
+            let (mut handshake, mut dead) = (handshake, dead);
             match event {
+                Event::PreviewReady => {
+                    // `peek`, not a read: this listener is not a reactive
+                    // scope, and reading here would subscribe nothing anyway.
+                    let next = handshake.peek().wrapping_add(1);
+                    handshake.set(next);
+                    // A fresh document is a live one: this is the only thing
+                    // that clears a death notice, and it means the frame was
+                    // reloaded.
+                    dead.set(None);
+                }
+                Event::PreviewPanicked { message } => dead.set(Some(message.clone())),
                 Event::StoryRendered { id } => rendered.set(Some(id.clone())),
                 Event::StoryMissing { id } => stale.set(Some(id.clone())),
                 Event::StoryPrepared { initial_args: defaults, .. } => {
@@ -147,6 +253,9 @@ pub fn Storybook(registry: Registry) -> Element {
     use_effect(move || {
         let id = selected();
         let current_args = args();
+        // Read, not ignored: this is what subscribes the effect to the
+        // handshake, so a preview that (re)mounts gets the current state.
+        let _ = handshake();
         browser::write_url_state(&UrlState {
             id: id.clone(),
             args: current_args.clone(),
@@ -209,6 +318,19 @@ pub fn Storybook(registry: Registry) -> Element {
         }
     };
 
+    // Computed once, at mount. The iframe's `src` must not track live state:
+    // changing it reloads the frame, and the whole point of the channel is that
+    // it does not have to.
+    let mut frame_src = use_signal(|| {
+        browser::preview_src(&UrlState {
+            id: landing.clone(),
+            args: initial.args.clone(),
+        })
+    });
+    // Bumped only by the reload button. Changing `src` is what reloads an
+    // iframe, which is precisely why nothing else may touch it.
+    let mut reloads = use_signal(|| 0usize);
+
     let current = selected().and_then(|id| registry.get(&id));
     let row_list = rows();
     // Clearing the overrides already tells the preview everything it needs, but
@@ -257,7 +379,7 @@ pub fn Storybook(registry: Registry) -> Element {
             aside { class: "dxsb-sidebar",
                 div { class: "dxsb-brand",
                     span { "dioxus-storybook" }
-                    span { class: "dxsb-badge", "M2" }
+                    span { class: "dxsb-badge", "M3" }
                 }
                 div { class: "dxsb-searchwrap",
                     input {
@@ -310,7 +432,22 @@ pub fn Storybook(registry: Registry) -> Element {
 
             main { class: "dxsb-main",
                 Toolbar { story: current }
-                Preview { registry }
+                if let Some(message) = dead() {
+                    PreviewDied {
+                        message,
+                        on_reload: move |()| {
+                            let next = reloads() + 1;
+                            reloads.set(next);
+                            let base = browser::preview_src(&UrlState {
+                                id: selected(),
+                                args: args(),
+                            });
+                            frame_src.set(format!("{base}&dxsb-reload={next}"));
+                            dead.set(None);
+                        },
+                    }
+                }
+                PreviewFrame { src: frame_src() }
                 AddonPanel {
                     arg_types: current.map(StoryDef::arg_types).unwrap_or(&[]),
                     initial: initial_args(),
@@ -429,6 +566,57 @@ fn Toolbar(story: Option<&'static StoryDef>) -> Element {
     }
 }
 
+/// The notice shown when the story canvas has stopped.
+///
+/// This exists because of the split. One document per half means the shell can
+/// keep working — sidebar, panels, search — while the thing it is a workbench
+/// *for* is a frozen rectangle. Saying so, with the panic message and a way
+/// back, is the difference between a bug and a mystery.
+///
+/// There is no automatic recovery to offer: `panic = "abort"` means the wasm
+/// module is gone, not unwound, so the frame has to be reloaded.
+#[component]
+fn PreviewDied(message: String, on_reload: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "dxsb-died", role: "alert",
+            div { class: "dxsb-died-head",
+                strong { "The preview stopped." }
+                button {
+                    class: "dxsb-panelbtn",
+                    onclick: move |_| on_reload.call(()),
+                    "Reload the preview"
+                }
+            }
+            pre { class: "dxsb-died-body", "{message}" }
+        }
+    }
+}
+
+/// The preview, in a document of its own.
+///
+/// `src` points back at this same app with `?viewMode=preview`, so the bundle
+/// the browser already has is what loads inside — no second build, no second
+/// HTML file, no dx configuration.
+///
+/// Deliberately **not** sandboxed. A `sandbox` attribute permissive enough to
+/// run the story (`allow-scripts`) and let the two halves talk
+/// (`allow-same-origin`) grants back everything it took away, so it would be
+/// decoration. What the frame actually buys is a separate DOM, a separate CSS
+/// cascade, a separate JS global scope and a viewport that can be resized
+/// independently — isolation from *accident*, not from malice. The stories are
+/// the developer's own code, compiled into the same binary as the shell.
+#[component]
+fn PreviewFrame(src: String) -> Element {
+    rsx! {
+        iframe {
+            id: PREVIEW_FRAME_ID,
+            class: "dxsb-frame",
+            src: "{src}",
+            title: "Story preview",
+        }
+    }
+}
+
 /// The preview harness.
 ///
 /// It deliberately learns which story to render from the [`Channel`], not from
@@ -437,8 +625,8 @@ fn Toolbar(story: Option<&'static StoryDef>) -> Element {
 ///
 /// [`Channel`]: dioxus_storybook_core::Channel
 #[component]
-fn Preview(registry: Registry) -> Element {
-    let channel: InProcessChannel = use_context();
+fn Preview(registry: Registry, project: Project) -> Element {
+    let channel: ChannelHandle = use_context();
 
     // Resolved here, not received as a prop: the preview owns its initial state
     // exactly as an iframe would, and the channel carries every change after.
@@ -479,6 +667,16 @@ fn Preview(registry: Registry) -> Element {
         })))
     });
 
+    // Announce, and only now: the subscription above has to exist first, because
+    // the manager answers a handshake with the current story and args, and in a
+    // synchronous transport that answer arrives before this hook returns.
+    //
+    // A hook rather than an effect, deliberately. Effects are a renderer's
+    // business — they do not run under a bare `VirtualDom`, which is exactly the
+    // arrangement `tests/two_documents.rs` uses to pair the two halves.
+    let announcer = channel.clone();
+    use_hook(|| announcer.emit(Event::PreviewReady));
+
     // Only the failure case is reported from here; a story that resolves reports
     // itself from inside `StoryHost`, which is the scope that actually rendered it.
     let reporter = channel.clone();
@@ -502,7 +700,12 @@ fn Preview(registry: Registry) -> Element {
                 // preview's hook list, and two stories that call a different
                 // number of hooks would then corrupt each other on a switch.
                 for def in [def] {
-                    StoryHost { key: "{def.id()}", story: def, args: overrides.clone() }
+                    StoryHost {
+                        key: "{def.id()}",
+                        story: def,
+                        args: overrides.clone(),
+                        project,
+                    }
                 }
             }
         },
@@ -537,8 +740,8 @@ fn Preview(registry: Registry) -> Element {
 ///   — the manager must not compute it, because from M3 the story functions live
 ///   in the other bundle.
 #[component]
-fn StoryHost(story: &'static StoryDef, args: ArgMap) -> Element {
-    let channel: InProcessChannel = use_context();
+fn StoryHost(story: &'static StoryDef, args: ArgMap, project: Project) -> Element {
+    let channel: ChannelHandle = use_context();
     let id = story.id();
 
     let sink_channel = channel.clone();
@@ -577,8 +780,10 @@ fn StoryHost(story: &'static StoryDef, args: ArgMap) -> Element {
     use_effect(move || reporter.emit(Event::StoryRendered { id: id.clone() }));
 
     // The story body is a fn pointer invoked right here, inside a live Dioxus
-    // scope, because `rsx!` and `EventHandler::new` need one.
-    story.render(&args)
+    // scope, because `rsx!` and `EventHandler::new` need one — and so do the
+    // decorators wrapped around it, which is the other reason this is a
+    // component rather than a few lines in `Preview`.
+    story.render_decorated(project, &args)
 }
 
 #[component]

@@ -1,0 +1,18 @@
+[package]
+name = "s4-iframe"
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "M3 spike: does one wasm bundle, loaded twice (page + iframe), talk to itself over postMessage under dx serve?"
+
+[dependencies]
+dioxus = { workspace = true, features = ["web"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Window", "Location", "Document", "Element", "HtmlIFrameElement",
+    "MessageEvent", "EventTarget",
+] }
+wasm-bindgen = "0.2"

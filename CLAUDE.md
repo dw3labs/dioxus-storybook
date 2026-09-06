@@ -6,7 +6,8 @@ isolation, driven by controls auto-generated from the props type, and later
 doubling as tests and documentation.
 
 **Status:** M0 (spikes), M1 (walking skeleton) and M2 (controls & actions)
-complete. M3 not started.
+complete. M3 in progress — the iframe split, decorators and parameters are done;
+globals/toolbar and the environment addons are not.
 **Scope:** a publishable open-source crate — semver + docs discipline apply.
 **Name:** `dioxus-storybook` · MIT · © DW3Labs.
 **Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
@@ -53,6 +54,7 @@ log/
   0002-m0-spikes.md
   0003-m1-walking-skeleton.md
   0004-m2-controls-and-actions.md
+  0005-m3-isolation.md
 docs/
   PLAN.md                  the working plan: features, problems, milestones
   M0-FINDINGS.md           full spike write-up
@@ -64,11 +66,12 @@ crates/                    the published crates — all v0.1.0
   dioxus-storybook-build/  build-script story indexer
   dioxus-storybook-ui/     manager shell + preview harness
 examples/
-  button-gallery/          2 components, 9 stories — the thing you actually run
-spikes/                    M0 evidence, kept but superseded by crates/
+  button-gallery/          4 components, 15 stories — the thing you actually run
+spikes/                    evidence, kept but superseded by crates/
   s1-hotreload/            vertical slice app (EXCLUDED from the workspace)
   s2-registry/             story-registration mechanism comparison
   s3-controls/             #[derive(Controls)] proc macro + 15 tests
+  s4-iframe/               M3: one bundle, loaded twice, talking to itself
 Cargo.toml                 workspace (edition 2024)
 ```
 
@@ -78,8 +81,11 @@ Cargo.toml                 workspace (edition 2024)
 # Run the storybook. This is the main loop.
 cd examples/button-gallery && dx serve --platform web
 
-# The whole suite: 67 tests + 10 doctests. Everything must stay green.
+# The whole suite: 130 tests + 11 doctests. Everything must stay green.
 cargo test --workspace
+
+# Definition of done for anything macro-facing. Must be clean.
+rust-analyzer diagnostics .
 
 # Check the publish metadata still holds
 cargo package -p dioxus-storybook-core
@@ -88,6 +94,7 @@ cargo package -p dioxus-storybook-core
 cd spikes/s1-hotreload && dx serve --platform web   # note the cd, it is load-bearing
 cargo test -p s3-test                               # 15 tests, real Dioxus types
 ./spikes/s2-registry/verify.sh                      # the registration matrix
+cd spikes/s4-iframe && dx serve --platform web      # the M3 iframe spike
 ```
 
 ---
@@ -99,7 +106,13 @@ cargo test -p s3-test                               # 15 tests, real Dioxus type
 | Registry | **build-script codegen** | `linkme` and `inventory` both fail on wasm — see log |
 | Controls | **`#[derive(Controls)]`** on the Props struct | macro sees names, types and doc comments statically, and the applier it emits is compiler-checked |
 | Args → props | an **applier**, not a deserializer | props hold `EventHandler`/`Element`, which aren't serializable |
-| Isolation | **`Channel` trait from commit 1**, in-process now, iframe at M3 | lets the transport change without rewriting addons |
+| Isolation | **`Channel` trait from commit 1**; iframe + `postMessage` since M3 | the transport changed without a single addon changing |
+| M3 split | **one bundle, loaded twice** — `?viewMode=preview` — not two bundles | isolation is a property of the *document*; a second build unit costs the shared registry and buys nothing |
+| Wire format | **hand-rolled, length-prefixed**, no `serde` | nine tags over a closed vocabulary, and `ArgMap` already had a tested textual codec |
+| Handshake | preview emits `PreviewReady`; manager **resyncs** rather than queues | every manager→preview message is state, not a command |
+| Panics | a **panic hook** posts `PreviewPanicked`; there is no recovery | `panic = "abort"` means the module is gone, not unwound |
+| Decorators | `fn(&StoryContext, Element) -> Element` at three levels | a context struct now, because widening the signature later would break every decorator |
+| Parameters | **`ResolvedParameters`** consults three levels in order | no allocation, stays `Copy`, innermost wins |
 | Platform | **web-first** | the static build is both the shareable artifact and the screenshot-test substrate |
 | Story bodies | **fn pointers invoked in-scope** | `rsx!`/`EventHandler::new` need an active Dioxus scope |
 | Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |
@@ -107,7 +120,7 @@ cargo test -p s3-test                               # 15 tests, real Dioxus type
 | Story ↔ component | **`macro_rules!` bridge from `story_meta!`** | `#[story]` knows the props type, `story_meta!` knows the component; neither can name the other's half |
 | Actions | **substitution in `wire_actions`**, emitted by the same derive | an `EventHandler` is observed, not edited, so `apply` cannot do it |
 | Action payloads | **autoref specialisation on `Debug`** | prints what it can without putting a bound on the user's prop types |
-| Default arg values | **the preview computes them, the manager receives them** | evaluating props needs a scope, and at M3 the story fns are in the other bundle |
+| Default arg values | **the preview computes them, the manager receives them** | evaluating props needs a scope, and the manager renders no stories |
 | Story scope | **one remounted `StoryHost` per story** | a story's hooks must not share the preview's hook list |
 
 ## Gotchas that will bite you
@@ -116,6 +129,14 @@ cargo test -p s3-test                               # 15 tests, real Dioxus type
   enabled`). Use plain `dx serve --platform web`. `panic = "abort"` does *not*
   fix it — already tried.
 - **`dx` and the `dioxus` crate versions must match exactly** or dx refuses to run.
+- **`dx serve` does not notice changes under `crates/`,** nor a brand-new story
+  file. Restart it (~20-25s) rather than wondering why nothing changed.
+- **`use_effect` does not run under a bare `VirtualDom`.** `process_events()`
+  does, but only with no dirty scopes. This is why the preview's `PreviewReady`
+  handshake is a hook, not an effect.
+- **`window.parent` is `window` when a page is not framed,** and
+  `window.onmessage` is shared with browser extensions. Both are why every
+  message carries a magic prefix and its sender's role.
 - **`spikes/s1-hotreload` is excluded from the workspace.** `cd` into it;
   `--package s1-hotreload` from the root will not find it.
 - **Workspace is edition 2024** → `#[unsafe(no_mangle)]`, not `#[no_mangle]`.

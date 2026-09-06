@@ -331,9 +331,28 @@ types. S2 killed both automatic-registration options. Details in
 > comma-separated text — a real list widget is a later, non-breaking addition.
 > See LOG-0004.
 
-### M3 · Isolation, globals & environment (~2–3 weeks)
-Split manager/preview into two wasm bundles + `postMessage` `Channel` impl (no addon changes) · decorators at 3 levels · parameters with merge semantics · globals + toolbar · viewport, backgrounds, measure, outline addons · error boundary reporting panics to the manager.
+### M3 · Isolation, globals & environment (~2–3 weeks) — 🚧 **IN PROGRESS**
+Split manager/preview into two documents + `postMessage` `Channel` impl (no addon changes) · decorators at 3 levels · parameters with merge semantics · globals + toolbar · viewport, backgrounds, measure, outline addons · error boundary reporting panics to the manager.
 > **Delivers:** robustness + environment testing. Unblocks everything downstream.
+>
+> **Done (session 0005):** the split, decorators, parameter merging, and panic
+> reporting. **Not done:** globals + toolbar, the four environment addons, and an
+> `ErrorBoundary` for `Element`-level errors.
+>
+> One correction to the scope above, and it is worth reading before touching
+> this milestone again. "**Two wasm bundles**" was the wrong shape. The manager
+> points its iframe at *its own URL* with `?viewMode=preview` and the same
+> bundle loads twice, each copy rendering a different half. That gives the same
+> isolation — separate DOM, CSS cascade, JS globals, viewport, reload — with one
+> build, no hand-written `iframe.html`, and, decisively, a manager that can still
+> see the story registry it needs for the sidebar and the props tables. So
+> `ArgType` stays `&'static` on both sides and nothing on the wire needed an
+> owned mirror. See LOG-0005.
+>
+> Two items came forward from later in the plan because the split *created* the
+> need for them: a story in a frame inherits none of the app's CSS (decorators
+> are the answer), and a story that panics now dies out of sight (a panic hook
+> reports it, since `panic = "abort"` rules out catching anything).
 
 ### M4 · Docs (~3 weeks)
 Autodocs page per component · props table from `ArgType` + doc comments · story source snippet (macro captures the rsx token stream as `&'static str`) · description from component doc comments · docs/canvas tab toggle.

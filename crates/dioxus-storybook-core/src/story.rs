@@ -46,10 +46,10 @@ pub enum ParamValue {
     Bool(bool),
 }
 
-/// Static addon configuration attached to a meta or a story.
+/// Static addon configuration attached to a project, a meta or a story.
 ///
-/// M1 stores parameters but does not yet merge them across the
-/// global → component → story levels; that lands with decorators in M3.
+/// One level's worth. The three levels are merged by [`ResolvedParameters`],
+/// which is what an addon actually reads.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Parameters {
     entries: &'static [(&'static str, ParamValue)],
@@ -80,6 +80,218 @@ impl Parameters {
     }
 }
 
+/// Parameters as an addon sees them: the three levels, innermost first.
+///
+/// Merging is by key and the innermost level wins, so a story can override its
+/// component, which can override the project. Nothing is allocated or copied to
+/// do it — the levels are kept side by side and consulted in order, which also
+/// means a resolved set stays `Copy` and `const`-friendly.
+///
+/// ```
+/// # use dioxus_storybook_core::{ParamValue, Parameters, ResolvedParameters};
+/// static PROJECT: &[(&str, ParamValue)] =
+///     &[("layout", ParamValue::Str("padded")), ("theme", ParamValue::Str("light"))];
+/// static STORY: &[(&str, ParamValue)] = &[("layout", ParamValue::Str("centered"))];
+///
+/// let resolved = ResolvedParameters::new(
+///     Parameters::from_static(PROJECT),
+///     Parameters::new(),
+///     Parameters::from_static(STORY),
+/// );
+/// assert_eq!(resolved.get("layout"), Some(ParamValue::Str("centered")));
+/// assert_eq!(resolved.get("theme"), Some(ParamValue::Str("light")));
+/// assert_eq!(resolved.get("nothing"), None);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ResolvedParameters {
+    project: Parameters,
+    component: Parameters,
+    story: Parameters,
+}
+
+impl ResolvedParameters {
+    /// Stack three levels, outermost first.
+    pub const fn new(project: Parameters, component: Parameters, story: Parameters) -> Self {
+        Self { project, component, story }
+    }
+
+    /// The value for `key` from the innermost level that sets it.
+    pub fn get(&self, key: &str) -> Option<ParamValue> {
+        self.story
+            .get(key)
+            .or_else(|| self.component.get(key))
+            .or_else(|| self.project.get(key))
+    }
+
+    /// The value for `key` if it is a string.
+    pub fn str(&self, key: &str) -> Option<&'static str> {
+        match self.get(key) {
+            Some(ParamValue::Str(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The value for `key` if it is a number.
+    pub fn num(&self, key: &str) -> Option<f64> {
+        match self.get(key) {
+            Some(ParamValue::Num(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// The value for `key` if it is a boolean, or `default` if it is unset.
+    ///
+    /// A parameter of the wrong type also yields `default`: an addon reading a
+    /// flag should not be able to be crashed by a typo three levels up.
+    pub fn flag(&self, key: &str, default: bool) -> bool {
+        match self.get(key) {
+            Some(ParamValue::Bool(b)) => b,
+            _ => default,
+        }
+    }
+
+    /// Every key that is set anywhere, each with its winning value.
+    ///
+    /// Order is innermost level first, then the keys a level introduces.
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, ParamValue)> + use<'_> {
+        let mut seen: Vec<&'static str> = Vec::new();
+        let levels = [self.story, self.component, self.project];
+        let mut out: Vec<(&'static str, ParamValue)> = Vec::new();
+        for level in levels {
+            for (key, value) in level.iter() {
+                if !seen.contains(&key) {
+                    seen.push(key);
+                    out.push((key, value));
+                }
+            }
+        }
+        out.into_iter()
+    }
+}
+
+/// Wraps a story's rendered output.
+///
+/// A decorator is what you reach for when a story needs *surroundings* rather
+/// than different props: a theme provider, a router, a fixed-width box, a
+/// stylesheet. It receives the story's [`StoryContext`] and the element the
+/// story produced, and returns whatever should be rendered instead.
+///
+/// ```
+/// # use dioxus_storybook_core::{Decorator, StoryContext};
+/// # use dioxus_core::Element;
+/// static PADDED: Decorator = |_ctx: &StoryContext, story: Element| {
+///     // in real code, `rsx! { div { style: "padding:2rem", {story} } }`
+///     story
+/// };
+/// ```
+///
+/// # Where it runs
+///
+/// Inside the story's own scope, in the *preview* document. That is what makes
+/// a decorator the answer to the question the M3 iframe raises — "how does my
+/// app's stylesheet get into the frame?" — because a project-level decorator is
+/// rendered in that document and can put a `document::Link` in it.
+///
+/// # Order
+///
+/// Project decorators are outermost, then the component's, then the story's.
+/// Within one level, the first in the slice is the innermost, so reading a list
+/// top to bottom walks inwards towards the story.
+pub type Decorator = fn(&StoryContext, Element) -> Element;
+
+/// What a decorator is told about the story it is wrapping.
+///
+/// `#[non_exhaustive]` and built only by this crate: it will grow globals and a
+/// viewport later in M3, and growing it must not break a decorator.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct StoryContext {
+    id: String,
+    title: &'static str,
+    name: &'static str,
+    args: ArgMap,
+    parameters: ResolvedParameters,
+}
+
+impl StoryContext {
+    /// The story's stable identifier, `kebab(title)--kebab(name)`.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The slash-separated sidebar path.
+    pub const fn title(&self) -> &'static str {
+        self.title
+    }
+
+    /// The story's display name.
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The args the story is being rendered with.
+    pub const fn args(&self) -> &ArgMap {
+        &self.args
+    }
+
+    /// Parameters, merged across project, component and story.
+    pub const fn parameters(&self) -> ResolvedParameters {
+        self.parameters
+    }
+}
+
+/// Configuration that applies to every story in the book.
+///
+/// The outermost decorator layer and the bottom parameter layer — Storybook
+/// calls these "project annotations" and keeps them in `preview.js`. Hand one to
+/// [`Storybook`](https://docs.rs/dioxus-storybook/latest/dioxus_storybook/fn.Storybook.html):
+///
+/// ```
+/// # use dioxus_storybook_core::{Decorator, Project, StoryContext};
+/// # use dioxus_core::Element;
+/// static DECORATORS: &[Decorator] = &[|_ctx: &StoryContext, story: Element| story];
+/// static PROJECT: Project = Project::new().with_decorators(DECORATORS);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Project {
+    decorators: &'static [Decorator],
+    parameters: Parameters,
+}
+
+impl Project {
+    /// No decorators, no parameters.
+    pub const fn new() -> Self {
+        Self {
+            decorators: &[],
+            parameters: Parameters::new(),
+        }
+    }
+
+    /// Decorators wrapping every story, outside the component's and the story's.
+    #[must_use]
+    pub const fn with_decorators(mut self, decorators: &'static [Decorator]) -> Self {
+        self.decorators = decorators;
+        self
+    }
+
+    /// Parameters every story inherits unless it or its component says otherwise.
+    #[must_use]
+    pub const fn with_parameters(mut self, parameters: Parameters) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    /// The project-level decorators.
+    pub const fn decorators(&self) -> &'static [Decorator] {
+        self.decorators
+    }
+
+    /// The project-level parameters.
+    pub const fn parameters(&self) -> Parameters {
+        self.parameters
+    }
+}
+
 /// Component-level description shared by every story in a module.
 ///
 /// Produced by the `story_meta!` macro; read by the `#[story]` macro to fill in
@@ -90,6 +302,7 @@ pub struct Meta {
     component: &'static str,
     tags: &'static [&'static str],
     parameters: Parameters,
+    decorators: &'static [Decorator],
 }
 
 impl Meta {
@@ -100,6 +313,7 @@ impl Meta {
             component,
             tags: &[],
             parameters: Parameters::new(),
+            decorators: &[],
         }
     }
 
@@ -117,9 +331,21 @@ impl Meta {
         self
     }
 
+    /// Attach decorators wrapping every story in the module.
+    #[must_use]
+    pub const fn with_decorators(mut self, decorators: &'static [Decorator]) -> Self {
+        self.decorators = decorators;
+        self
+    }
+
     /// The slash-separated sidebar path, e.g. `"Forms/Button"`.
     pub const fn title(&self) -> &'static str {
         self.title
+    }
+
+    /// Decorators inherited by every story in the module.
+    pub const fn decorators(&self) -> &'static [Decorator] {
+        self.decorators
     }
 
     /// The component's name, for the docs page.
@@ -150,6 +376,14 @@ pub struct StoryDef {
     base_args: fn() -> ArgMap,
     tags: &'static [&'static str],
     parameters: Parameters,
+    decorators: &'static [Decorator],
+    /// The component-level metadata this story inherited.
+    ///
+    /// Kept whole rather than copied field by field, so that every later
+    /// addition to `Meta` reaches stories without `StoryDef` growing a field
+    /// and the macro growing a line. `title` and `tags` are the exception: they
+    /// are already merged by `#[story]` and stored resolved.
+    meta: Meta,
 }
 
 impl StoryDef {
@@ -170,6 +404,8 @@ impl StoryDef {
             base_args: ArgMap::new,
             tags: &[],
             parameters: Parameters::new(),
+            decorators: &[],
+            meta: Meta::new(title, ""),
         }
     }
 
@@ -199,6 +435,33 @@ impl StoryDef {
     pub const fn with_parameters(mut self, parameters: Parameters) -> Self {
         self.parameters = parameters;
         self
+    }
+
+    /// Attach decorators wrapping only this story, inside its component's.
+    #[must_use]
+    pub const fn with_decorators(mut self, decorators: &'static [Decorator]) -> Self {
+        self.decorators = decorators;
+        self
+    }
+
+    /// Attach the component-level metadata this story belongs to.
+    ///
+    /// `#[story]` does this for you; it is how a story reaches the parameters
+    /// and decorators declared once in `story_meta!`.
+    #[must_use]
+    pub const fn with_meta(mut self, meta: Meta) -> Self {
+        self.meta = meta;
+        self
+    }
+
+    /// The component-level metadata this story inherited.
+    pub const fn meta(&self) -> Meta {
+        self.meta
+    }
+
+    /// Decorators declared on this story alone.
+    pub const fn decorators(&self) -> &'static [Decorator] {
+        self.decorators
     }
 
     /// The slash-separated sidebar path, e.g. `"Forms/Button"`.
@@ -253,9 +516,48 @@ impl StoryDef {
 
     /// Render the story with `args` overlaid on its defaults.
     ///
-    /// Must be called from inside a Dioxus scope.
+    /// Must be called from inside a Dioxus scope. This is the bare story;
+    /// [`render_decorated`](Self::render_decorated) is what the preview calls.
     pub fn render(&self, args: &ArgMap) -> Element {
         (self.render)(args)
+    }
+
+    /// Parameters for this story, merged across project, component and story.
+    pub const fn resolved_parameters(&self, project: Project) -> ResolvedParameters {
+        ResolvedParameters::new(project.parameters(), self.meta.parameters(), self.parameters)
+    }
+
+    /// What a decorator is told about this story.
+    pub fn context(&self, project: Project, args: &ArgMap) -> StoryContext {
+        StoryContext {
+            id: self.id(),
+            title: self.title,
+            name: self.name,
+            args: args.clone(),
+            parameters: self.resolved_parameters(project),
+        }
+    }
+
+    /// Render the story inside its decorators: story's, then its component's,
+    /// then the project's.
+    ///
+    /// The fold runs outwards, so the *last* decorator applied is the outermost
+    /// element — which is why the chain is ordered innermost-level first.
+    ///
+    /// Must be called from inside a Dioxus scope: a decorator may use `rsx!`,
+    /// and so may the story.
+    pub fn render_decorated(&self, project: Project, args: &ArgMap) -> Element {
+        let chain = self
+            .decorators
+            .iter()
+            .chain(self.meta.decorators())
+            .chain(project.decorators());
+        let context = self.context(project, args);
+        let mut element = self.render(args);
+        for decorate in chain {
+            element = decorate(&context, element);
+        }
+        element
     }
 }
 

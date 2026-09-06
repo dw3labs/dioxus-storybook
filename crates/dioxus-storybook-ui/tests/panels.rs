@@ -6,11 +6,12 @@
 //! `StoryPrepared` — the manager never evaluates a story's props — so seeing a
 //! default in the rendered table exercises that whole round trip.
 
+mod common;
+
+use common::{Documents, unpaired_preview_html};
 use dioxus::prelude::*;
 use dioxus_ssr::render;
-use dioxus_storybook_core::{
-    ArgMap, ArgType, ArgValue, Control, Controllable, Registry, StoryDef,
-};
+use dioxus_storybook_core::{ArgMap, ArgType, ArgValue, Control, Controllable, StoryDef};
 
 // ------------------------------------------------------------- a props type
 
@@ -105,18 +106,14 @@ static BARE: StoryDef = StoryDef::new("Forms/Bare", "Default", |_| {
 static ALL: &[&StoryDef] = &[&DEMO, &BARE];
 static ONLY_BARE: &[&StoryDef] = &[&BARE];
 
-/// Render the shell and let one round trip on the channel settle.
+/// Stand up both documents and let the conversation settle, then look at the
+/// shell.
 ///
-/// `rebuild_in_place` is a single pass, and `StoryPrepared` is emitted *during*
-/// the preview's first render — so the manager learns the story's defaults one
-/// pass later, exactly as it would land on the next frame in a browser.
+/// From M3 the preview is a separate `VirtualDom`, so `StoryPrepared` reaches
+/// the panel by crossing an encoded wire rather than by a function call one pass
+/// later. See `tests/common/mod.rs`.
 fn settled_shell(stories: &'static [&'static StoryDef]) -> String {
-    use dioxus_storybook_ui::{Storybook, StorybookProps};
-    let registry = Registry::new(stories);
-    let mut dom = VirtualDom::new_with_props(Storybook, StorybookProps { registry });
-    dom.rebuild_in_place();
-    let _ = dom.render_immediate_to_vec();
-    render(&dom)
+    Documents::new(stories).manager_html()
 }
 
 // -------------------------------------------------------------------- tests
@@ -270,7 +267,7 @@ fn switching_stories_remounts_the_host_instead_of_reusing_its_hooks() {
 static ONLY_HOOKED: &[&StoryDef] = &[&HOOKED_A];
 
 #[test]
-fn a_story_that_uses_hooks_renders_inside_the_shell() {
-    let html = settled_shell(ONLY_HOOKED);
+fn a_story_that_uses_hooks_renders_inside_the_preview() {
+    let html = unpaired_preview_html(ONLY_HOOKED);
     assert!(html.contains("a:0"), "hook-using story did not render: {html}");
 }

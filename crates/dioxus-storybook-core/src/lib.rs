@@ -31,13 +31,18 @@ pub mod channel;
 pub mod registry;
 pub mod story;
 pub mod url;
+pub mod wire;
 
 pub use actions::{ActionSink, ArgsHandle, use_args};
 pub use arg_type::{ArgType, Control};
 pub use args::{ArgMap, ArgValue, ControlEnum, Controllable, FromArg, ToArg};
-pub use channel::{Channel, Event, InProcessChannel, Listener, Subscription};
+pub use channel::{Channel, ChannelHandle, Event, InProcessChannel, Listener, Subscription};
 pub use registry::{
     Group, Registry, Row, RowKind, StoryRef, TreeNode, flatten, fuzzy_score, group_paths,
 };
-pub use story::{Meta, ParamValue, Parameters, StoryDef, kebab};
+pub use story::{
+    Decorator, Meta, ParamValue, Parameters, Project, ResolvedParameters, StoryContext,
+    StoryDef, kebab,
+};
 pub use url::UrlState;
+pub use wire::ViewMode;

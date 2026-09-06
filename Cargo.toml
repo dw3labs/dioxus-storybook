@@ -23,6 +23,7 @@ members = [
     "spikes/s3-controls/test",
     "spikes/s3-controls/macro",
     "spikes/s3-controls/core",
+    "spikes/s4-iframe",
 ]
 exclude = ["spikes/s1-hotreload"]
 

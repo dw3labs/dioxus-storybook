@@ -1,8 +1,14 @@
 //! The manager's stylesheet.
 //!
 //! Inlined rather than shipped as an asset so that a storybook is a single wasm
-//! bundle with no extra fetch, and so the manager's CSS is trivially separable
-//! from the user's when the preview moves into an iframe at M3.
+//! bundle with no extra fetch.
+//!
+//! There are two stylesheets because from M3 there are two documents. The
+//! preview's iframe inherits nothing from the shell, which is the point — a
+//! component under test must not be styled by the workbench around it — so the
+//! handful of rules the canvas needs are restated there rather than shared.
+//! They are not quite the same rules either: in the shell the canvas is one row
+//! of a flex column, and in the frame it *is* the document.
 
 /// The manager shell stylesheet.
 pub const MANAGER_CSS: &str = r#"
@@ -39,6 +45,10 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-tag{font:10px ui-monospace,monospace;color:#4A5058;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:3px;padding:0 5px}
 
 .dxsb-canvas{flex:1;display:grid;place-items:center;padding:40px;background:#fff;overflow:auto;min-height:0}
+.dxsb-frame{flex:1;min-height:0;width:100%;border:0;background:#fff;display:block}
+.dxsb-died{background:#FDF2F2;border-bottom:1px solid #E8C4C4;color:#9B1B1B;padding:10px 18px;flex-shrink:0}
+.dxsb-died-head{display:flex;align-items:center;gap:12px;font-size:13px}
+.dxsb-died-body{margin:6px 0 0;font:11.5px/1.5 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;color:#7A1616;max-height:9em;overflow:auto}
 .dxsb-blank{color:#787F88;font-size:13px;text-align:center;max-width:44ch;line-height:1.6}
 .dxsb-blank code{font:12px ui-monospace,monospace;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:4px;padding:1px 5px}
 .dxsb-status{border-top:1px solid #E2E1DB;background:#F2F2EF;padding:6px 18px;font:11px ui-monospace,SFMono-Regular,monospace;color:#787F88;display:flex;gap:14px;flex-shrink:0}
@@ -91,4 +101,21 @@ body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;col
 .dxsb-actions li{display:flex;gap:10px;padding:5px 14px;border-bottom:1px solid #F0EFEA}
 .dxsb-actionname{color:#C4451B;font-weight:600;flex-shrink:0;min-width:9ch}
 .dxsb-actionpayload{color:#4A5058;white-space:pre-wrap;word-break:break-word}
+"#;
+
+/// The preview document's stylesheet.
+///
+/// Everything the story canvas needs and nothing else. Whatever the story
+/// itself brings — a component's own `style` attribute, a `document::Link` in a
+/// decorator — lands on top of this.
+pub const PREVIEW_CSS: &str = r#"
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:14px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif;color:#17191C;background:#fff}
+/* 100vh, not 100%: a percentage height only resolves against an ancestor chain
+   that has one, and the canvas sits inside whatever element the host app
+   mounted into. The frame's viewport is the one height always known. */
+.dxsb-canvas{min-height:100vh;display:grid;place-items:center;padding:40px;overflow:auto}
+.dxsb-blank{color:#787F88;font-size:13px;text-align:center;max-width:44ch;line-height:1.6}
+.dxsb-blank code{font:12px ui-monospace,monospace;background:#F2F2EF;border:1px solid #E2E1DB;border-radius:4px;padding:1px 5px}
 "#;

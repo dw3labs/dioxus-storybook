@@ -4,11 +4,16 @@
 //! host and its markup can be asserted on. That covers the sidebar tree, the
 //! search filter, the landing-story rule and the empty states — everything
 //! except the parts that genuinely need a DOM (focus, history).
+//!
+//! From M3 the shell is only half the app: the stories render in a document of
+//! their own. So anything about *story markup* is asserted on the preview, and
+//! the pair is stood up by `tests/common/mod.rs`.
 
+mod common;
+
+use common::{Documents, unpaired_preview_html};
 use dioxus::prelude::*;
-use dioxus_ssr::render;
-use dioxus_storybook_core::{Registry, StoryDef};
-use dioxus_storybook_ui::{Storybook, StorybookProps};
+use dioxus_storybook_core::StoryDef;
 
 static PRIMARY: StoryDef = StoryDef::new("Forms/Button", "Primary", |_| {
     rsx! { p { class: "story", "primary-body" } }
@@ -27,10 +32,7 @@ static ALL: &[&StoryDef] = &[&PRIMARY, &DANGER, &TEXT_INPUT, &CARD];
 static NONE: &[&StoryDef] = &[];
 
 fn shell(stories: &'static [&'static StoryDef]) -> String {
-    let registry = Registry::new(stories);
-    let mut dom = VirtualDom::new_with_props(Storybook, StorybookProps { registry });
-    dom.rebuild_in_place();
-    render(&dom)
+    Documents::new(stories).manager_html()
 }
 
 #[test]
@@ -44,10 +46,11 @@ fn the_sidebar_shows_every_group_and_story() {
 }
 
 #[test]
-fn the_first_story_renders_without_waiting_for_an_effect() {
-    // The preview resolves its own landing story, so the first paint is the
-    // story itself rather than a placeholder.
-    let html = shell(ALL);
+fn the_preview_paints_its_landing_story_before_any_message_arrives() {
+    // The framed document resolves its own landing story rather than waiting to
+    // be told, so the first paint is the story itself rather than a placeholder.
+    // Rendered here with no manager at all, so nothing could have told it.
+    let html = unpaired_preview_html(ALL);
     assert!(html.contains("primary-body"), "got: {html}");
     assert!(!html.contains("Select a story from the sidebar"));
 }
@@ -83,13 +86,13 @@ fn the_search_box_is_present_and_addressable() {
 #[test]
 fn story_bodies_are_invoked_in_scope() {
     // A story that builds an EventHandler panics unless it runs inside a live
-    // Dioxus scope. Rendering the shell is the proof that it does.
+    // Dioxus scope. Rendering the preview is the proof that it does.
     static HANDLER: StoryDef = StoryDef::new("Forms/Button", "Handler", |_| {
         let handler = EventHandler::new(|_: MouseEvent| {});
-        rsx! { button { onclick: move |e| handler.call(e), "ok" } }
+        rsx! { button { onclick: move |e| handler.call(e), "handler-story-rendered" } }
     });
     static WITH_HANDLER: &[&StoryDef] = &[&HANDLER];
 
-    let html = shell(WITH_HANDLER);
-    assert!(html.contains("ok"), "got: {html}");
+    let html = unpaired_preview_html(WITH_HANDLER);
+    assert!(html.contains("handler-story-rendered"), "got: {html}");
 }

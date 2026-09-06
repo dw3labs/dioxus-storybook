@@ -2524,6 +2524,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "s4-iframe"
+version = "0.0.0"
+dependencies = [
+ "dioxus",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
