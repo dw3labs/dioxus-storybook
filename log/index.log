@@ -42,8 +42,10 @@ READY TO RUN:
   cargo package -p dioxus-storybook-core       verifies the publish metadata
 
 SMALL FOLLOW-UPS (unblocked, do any time):
-  [ ] `git init` + a remote. The manifests have no repository/homepage/
-      documentation, and cargo package warns. Needed before the first publish.
+  [ ] Add a git REMOTE, then set repository/homepage/documentation in
+      [workspace.package] and inherit them per crate. `git init` is done
+      (initial commit 9c26379); cargo package still warns until the URLs exist.
+      Needed before the first publish.
   [ ] File upstream dx issue: `dx serve --hot-patch` fails on wasm with
       "exceptions proposal not enabled". Repro + analysis in LOG-0002.
   [ ] Publish order when the time comes: core -> macro -> build -> ui -> facade.
