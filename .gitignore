@@ -1,0 +1,9 @@
+target/
+dist/
+node_modules/
+
+# macOS
+.DS_Store
+
+# dx / trunk build output
+.dioxus/

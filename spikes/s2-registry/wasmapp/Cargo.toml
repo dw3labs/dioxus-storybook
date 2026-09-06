@@ -1,0 +1,13 @@
+[package]
+name = "s2-wasmapp"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+s2-core = { path = "../core" }
+s2-components = { path = "../components" }
+linkme.workspace = true

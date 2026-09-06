@@ -1,0 +1,165 @@
+================================================================================
+ DIOXUS STORYBOOK — PROJECT LOG INDEX
+ Read this file first. It is the entry point for every session.
+================================================================================
+
+PROJECT   A native Storybook for Dioxus: a component workbench where each
+          component's states are declared as "stories", rendered in isolation,
+          driven by auto-generated controls, and later doubling as tests + docs.
+STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
+          M1 (walking skeleton) COMPLETE — browse + render + URL state.
+          M2 (controls & actions) NOT STARTED.
+SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
+NAME      dioxus-storybook · MIT · (c) DW3Labs
+TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
+
+
+--------------------------------------------------------------------------------
+ HOT — what happens next
+--------------------------------------------------------------------------------
+
+NOTHING IS BLOCKED. D1 and D5 were answered in session 0003:
+  D1 -> (b) publishable open-source crate. M0..M6, semver discipline.
+  D5 -> `dioxus-storybook-*`. MIT, (c) DW3Labs.
+
+NEXT UP (M2 — controls & actions, ~3-4 weeks). The differentiating milestone.
+  [ ] Controls panel — LARGELY A PORT. spikes/s1-hotreload/src/main.rs already
+      has a working widget for every Control variant (text, number, range,
+      toggle, select, radio, color). Lift it into dioxus-storybook-ui.
+  [ ] Reset-to-default button -> emit Event::ResetArgs (the variant exists).
+  [ ] Args panel edits must flow manager -> preview over the Channel, NOT via a
+      shared signal. The channel is the whole point; do not shortcut it.
+  [ ] Actions panel: wire EventHandler props to Event::ActionLogged.
+      Control::Action is already inferred by the derive for those fields.
+  [ ] use_args write-back, so a story can drive its own controlled inputs.
+  [ ] ArgValue for Vec<T> — add a variant (the enum is #[non_exhaustive], so
+      this is not a breaking change).
+
+READY TO RUN:
+  cargo test --workspace                       43 tests + 8 doctests, all green
+  rust-analyzer diagnostics .                  MUST stay clean — see standing facts
+  cd examples/button-gallery && dx serve --platform web
+  cargo package -p dioxus-storybook-core       verifies the publish metadata
+
+SMALL FOLLOW-UPS (unblocked, do any time):
+  [ ] `git init` + a remote. The manifests have no repository/homepage/
+      documentation, and cargo package warns. Needed before the first publish.
+  [ ] File upstream dx issue: `dx serve --hot-patch` fails on wasm with
+      "exceptions proposal not enabled". Repro + analysis in LOG-0002.
+  [ ] Publish order when the time comes: core -> macro -> build -> ui -> facade.
+
+STILL OPEN (neither blocks M2):
+  D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
+      for rigour? Cannot do both first.
+  D4  Is `dx serve --platform desktop` in scope at all, or web-only forever?
+
+DO NOT DO:
+  - Do not reach for `linkme` or `inventory` for the story registry. Both were
+    tested and both fail on wasm. See LOG-0002 / S2 before revisiting.
+  - Do not pass `--hot-patch` to dx serve. It does not build.
+  - Do not add a controls panel that mutates the preview's args signal directly.
+    Route it through the Channel or M3's iframe split will require a rewrite.
+  - Do not emit a `macro_rules!` from one proc macro for another to call with a
+    value argument. It compiles and it breaks rust-analyzer. See standing facts.
+  - Do not construct StoryDef/Meta with struct literals. Fields are private on
+    purpose; use the const builders so adding a field stays non-breaking.
+
+
+--------------------------------------------------------------------------------
+ SESSION LOG  (newest last)
+--------------------------------------------------------------------------------
+
+ #     DATE        TITLE                        OUTCOME                  DETAIL
+----  ----------  ---------------------------  -----------------------  ---------------------------
+0001  2026-09-06  Research & project plan      Plan + 36-feature        log/0001-research-and-plan.md
+                                               inventory published
+0002  2026-09-06  M0 feasibility spikes        GO. 1 assumption         log/0002-m0-spikes.md
+                                               corrected, 1 option
+                                               killed, 1 feature moved
+
+0003  2026-09-06  M1 walking skeleton          5 crates + example.      log/0003-m1-walking-skeleton.md
+                                               D1/D5 answered. 43
+                                               tests. wasm builds.
+                                               Macro bridge redesigned
+                                               after an r-a false error.
+
+
+--------------------------------------------------------------------------------
+ STANDING FACTS  (things that cost time to learn — do not re-derive)
+--------------------------------------------------------------------------------
+
+TOOLCHAIN
+  * `dx` and the `dioxus` crate versions must match EXACTLY or dx refuses to run.
+  * Workspace is edition 2024 -> `#[no_mangle]` must be `#[unsafe(no_mangle)]`.
+
+BUILD / SERVE
+  * `dx serve --hot-patch` is BROKEN on wasm (exceptions proposal). Use plain
+    `dx serve --platform web`. Incremental rebuild is ~1.5s, which is enough.
+  * `spikes/s1-hotreload` is EXCLUDED from the cargo workspace. You must `cd`
+    into it; `--package s1-hotreload` from the root will not find it.
+
+RUST / DIOXUS GOTCHAS
+  * rsx! format strings interpolate IDENTS ONLY. `{a * b}` and `{if x {..}}`
+    fail to parse. Compute into a `let` first.
+  * `rsx!` and `EventHandler::new` need an active Dioxus SCOPE, not just a
+    runtime. Use `VirtualDom::in_scope(ScopeId::ROOT, ..)`, not `in_runtime`.
+    This covers ANYTHING that evaluates a story's props, not just rendering —
+    `StoryDef::base_args()` panics outside a scope too.
+  * `rsx!` expands to UNQUALIFIED `dioxus_core::` / `dioxus_signals::` paths.
+    They resolve only because `dioxus::prelude` re-exports those crate names, so
+    any file invoking rsx! — including one where OUR macro bridge expands it —
+    needs `dioxus::prelude::*` in scope. `dioxus_storybook::prelude` re-exports
+    it for this reason. Two globs re-exporting the same items do not conflict.
+  * `Key` is at `dioxus::prelude::Key` (via dioxus_elements). There is no
+    `dioxus::events::Key`.
+  * Writing a `Signal` inside an `Fn` callback: copy it INSIDE the closure body
+    (`let mut s = s;`). Capturing a `mut` copy makes the closure `FnMut`, even
+    though `Signal` is `Copy`, because the binding is what gets mutated.
+  * Rust privacy runs downward only. A build-script-generated registry module is
+    an ANCESTOR of the story modules it references, so generated story statics
+    must be `pub` regardless of the story fn's own visibility.
+
+PROC MACROS vs RUST-ANALYZER  (cost a session to find; cargo test cannot catch it)
+  * NEVER have one proc macro emit a `macro_rules!` that another proc macro's
+    expansion then calls with a VALUE argument. rustc accepts it; rust-analyzer
+    reports a false `E0425: no such value in this scope` at every call site.
+    Closest upstream issue: rust-analyzer#10644, OPEN since 2021. Do not wait
+    for a fix — emit a plain `fn` and have the macro learn the type it needs.
+  * What DOES work across an expansion boundary: referencing a plain module
+    ITEM (a `const`, a `fn`) generated by another proc macro. Verified.
+  * This is NOT the common "proc macro library has no proc macros" error. That
+    one means the dylib failed to load; the generic advice for it (enable
+    procMacro, cargo clean, restart server) does not apply here. Ours loaded
+    fine — derives expanded, only the macro_rules bridge failed.
+  * `rust-analyzer diagnostics .` runs headless and is part of DEFINITION OF
+    DONE for anything macro-facing. A green `cargo test` is not evidence that
+    the authoring surface is usable in an editor.
+  * RA also emits false `E0282: type annotations needed` for `Weak::upgrade`
+    results and for tuple-destructuring closure params over `Rc<dyn Fn(..)>`.
+    Write the type out; do not chase it.
+
+PROJECT STRUCTURE
+  * dx builds a workspace MEMBER fine — s1-hotreload's exclusion was not about
+    dx disliking workspaces. `examples/button-gallery` is a member and builds.
+  * `[profile.wasm-dev] panic = "abort"` is only honoured in the WORKSPACE ROOT
+    manifest. In a member package Cargo ignores it.
+  * `#[non_exhaustive]` has no effect inside its own crate — our own matches
+    stay exhaustive, and a wildcard arm there is an unreachable-pattern warning.
+
+TESTING TRAPS (both produced convincing WRONG answers — see LOG-0002)
+  * LTO const-folds a static registry into a literal. A registry test that just
+    counts entries can pass while proving nothing. Use `black_box` and read real
+    string bytes out of linear memory.
+  * macOS `sed -i ''` writes a sibling temp file (`.!PID!name.rs`). dx's file
+    watcher latches onto THAT, not your file. Never use it to script an edit for
+    a hot-reload measurement; write in place instead.
+
+
+--------------------------------------------------------------------------------
+ HOW TO LOG
+--------------------------------------------------------------------------------
+ 1. Create log/NNNN-short-slug.md using the shape of the existing entries.
+ 2. Add one row to the SESSION LOG table above.
+ 3. Rewrite the HOT section wholesale so it reflects reality at end of session.
+ 4. Promote anything expensive-to-relearn into STANDING FACTS.
+================================================================================

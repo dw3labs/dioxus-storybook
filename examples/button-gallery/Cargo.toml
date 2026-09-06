@@ -1,0 +1,15 @@
+[package]
+name = "button-gallery"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Example storybook: a Button component with four stories."
+
+[dependencies]
+dioxus = { workspace = true, features = ["web"] }
+dioxus-storybook = { workspace = true }
+
+[build-dependencies]
+dioxus-storybook-build = { workspace = true }

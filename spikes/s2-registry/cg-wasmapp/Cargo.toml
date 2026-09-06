@@ -1,0 +1,10 @@
+[package]
+name = "s2-cg-wasmapp"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+s2-cg-core = { path = "../cg-core" }
+s2-cg-components = { path = "../cg-components" }

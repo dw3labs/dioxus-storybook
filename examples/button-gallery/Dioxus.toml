@@ -1,0 +1,5 @@
+[application]
+name = "button-gallery"
+
+[web.app]
+title = "dioxus-storybook · button-gallery"

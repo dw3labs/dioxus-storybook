@@ -1,0 +1,73 @@
+[workspace]
+resolver = "3"
+members = [
+    # --- the published crates (M1+) -------------------------------------
+    "crates/dioxus-storybook",
+    "crates/dioxus-storybook-core",
+    "crates/dioxus-storybook-macro",
+    "crates/dioxus-storybook-build",
+    "crates/dioxus-storybook-ui",
+    "examples/button-gallery",
+
+    # --- M0 spikes (kept as evidence; not published) ---------------------
+    "spikes/s2-registry/core",
+    "spikes/s2-registry/components",
+    "spikes/s2-registry/wasmapp",
+    "spikes/s2-registry/inv-core",
+    "spikes/s2-registry/inv-components",
+    "spikes/s2-registry/inv-wasmapp",
+    "spikes/s2-registry/inv-wasmapp-unref",
+    "spikes/s2-registry/cg-core",
+    "spikes/s2-registry/cg-components",
+    "spikes/s2-registry/cg-wasmapp",
+    "spikes/s3-controls/test",
+    "spikes/s3-controls/macro",
+    "spikes/s3-controls/core",
+]
+exclude = ["spikes/s1-hotreload"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+authors = ["DW3Labs"]
+# `version` and `publish` are the SPIKE defaults. The published crates under
+# crates/ override both explicitly; everything else they inherit from here.
+version = "0.0.0"
+publish = false
+
+[workspace.dependencies]
+# Published crates, kept version-locked to each other.
+dioxus-storybook       = { path = "crates/dioxus-storybook",       version = "0.1.0" }
+dioxus-storybook-core  = { path = "crates/dioxus-storybook-core",  version = "0.1.0" }
+dioxus-storybook-macro = { path = "crates/dioxus-storybook-macro", version = "0.1.0" }
+dioxus-storybook-build = { path = "crates/dioxus-storybook-build", version = "0.1.0" }
+dioxus-storybook-ui    = { path = "crates/dioxus-storybook-ui",    version = "0.1.0" }
+
+# STANDING FACT: dx and dioxus versions must match EXACTLY (dx 0.7.10).
+dioxus      = "0.7.10"
+dioxus-core = "0.7.10"
+dioxus-ssr  = "0.7.10"
+
+syn         = { version = "2", features = ["full", "extra-traits"] }
+quote       = "1"
+proc-macro2 = "1"
+
+linkme = "0.3"
+
+# Release profile mirroring what `dx build --release` does to wasm:
+# aggressive size opts + LTO are exactly the conditions that would GC a
+# link-section registry. If linkme survives THIS, it survives dx.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# STANDING FACT (LOG-0002/S1): dx builds `--platform web` with a `wasm-dev`
+# profile. rustc 1.97 emits wasm exception-handling opcodes for unwinding that
+# dx's module emitter cannot parse; panic=abort removes them.
+[profile.wasm-dev]
+inherits = "dev"
+panic = "abort"

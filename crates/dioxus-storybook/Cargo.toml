@@ -1,0 +1,21 @@
+[package]
+name = "dioxus-storybook"
+version = "0.1.0"
+publish = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "A native Storybook for Dioxus: declare component states as stories, render them in isolation, browse them in a workbench."
+keywords = ["dioxus", "storybook", "components", "ui", "workbench"]
+categories = ["development-tools", "gui", "wasm"]
+readme = "README.md"
+
+[dependencies]
+dioxus = { workspace = true }
+dioxus-storybook-core = { workspace = true }
+dioxus-storybook-macro = { workspace = true }
+dioxus-storybook-ui = { workspace = true }
+
+[dev-dependencies]
+dioxus-ssr = { workspace = true }

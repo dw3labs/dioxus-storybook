@@ -1,0 +1,17 @@
+[package]
+name = "s1-hotreload"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+s3-core  = { path = "../s3-controls/core" }
+s3-macro = { path = "../s3-controls/macro" }
+
+# dx uses a `wasm-dev` profile for `--platform web`. rustc 1.97 emits wasm
+# exception-handling opcodes for unwinding, which dx's module emitter cannot
+# parse; panic=abort removes them.
+[profile.wasm-dev]
+inherits = "dev"
+panic = "abort"

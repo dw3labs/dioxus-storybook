@@ -1,0 +1,146 @@
+# Dioxus Storybook
+
+A native [Storybook](https://storybook.js.org/) for Dioxus: a component
+workbench where each component's states are declared as *stories*, rendered in
+isolation, driven by controls auto-generated from the props type, and later
+doubling as tests and documentation.
+
+**Status:** M0 (spikes) and M1 (walking skeleton) complete. M2 not started.
+**Scope:** a publishable open-source crate — semver + docs discipline apply.
+**Name:** `dioxus-storybook` · MIT · © DW3Labs.
+**Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
+
+---
+
+## ⚠️ Read the log first
+
+**`log/index.log` is the entry point for every session.** Before doing anything
+else, read it. It holds:
+
+- a **HOT** section — what is planned next, what is blocked, and what *not* to do;
+- a **SESSION LOG** table pointing at detailed entries in `log/NNNN-*.md`;
+- **STANDING FACTS** — things that cost real time to learn. Do not re-derive them.
+
+Several plausible-looking approaches in this project have already been tested and
+**rejected with evidence** (see STANDING FACTS). Re-attempting them wastes a
+session. When in doubt, grep the log before experimenting.
+
+### Logging protocol
+
+At the end of any session that changes the project's direction or knowledge:
+
+1. Create `log/NNNN-short-slug.md`, following the shape of the existing entries:
+   goal, what was done, findings (with evidence/commands), decisions, files
+   produced, notes for the next session.
+2. Add one row to the SESSION LOG table in `log/index.log`.
+3. **Rewrite the HOT section wholesale** so it reflects reality at session end.
+4. Promote anything expensive-to-relearn into STANDING FACTS.
+
+Record negative results as carefully as positive ones — most of this project's
+value so far is knowing which three approaches *don't* work.
+
+---
+
+## Layout
+
+```
+CLAUDE.md                  this file
+LICENSE                    MIT, (c) DW3Labs
+log/
+  index.log                ← START HERE: summary, HOT next steps, standing facts
+  0001-research-and-plan.md
+  0002-m0-spikes.md
+  0003-m1-walking-skeleton.md
+docs/
+  PLAN.md                  the working plan: features, problems, milestones
+  M0-FINDINGS.md           full spike write-up
+  plan-artifact.html       published version of the plan
+crates/                    the published crates — all v0.1.0
+  dioxus-storybook/        facade + prelude (re-exports dioxus::prelude)
+  dioxus-storybook-core/   StoryDef, Meta, args, Registry, Channel, url state
+  dioxus-storybook-macro/  #[story], story_meta!, Controls, ControlEnum
+  dioxus-storybook-build/  build-script story indexer
+  dioxus-storybook-ui/     manager shell + preview harness
+examples/
+  button-gallery/          2 components, 9 stories — the thing you actually run
+spikes/                    M0 evidence, kept but superseded by crates/
+  s1-hotreload/            vertical slice app (EXCLUDED from the workspace)
+  s2-registry/             story-registration mechanism comparison
+  s3-controls/             #[derive(Controls)] proc macro + 15 tests
+Cargo.toml                 workspace (edition 2024)
+```
+
+## Commands
+
+```bash
+# Run the storybook. This is the main loop.
+cd examples/button-gallery && dx serve --platform web
+
+# The whole suite: 43 tests + 8 doctests. Everything must stay green.
+cargo test --workspace
+
+# Check the publish metadata still holds
+cargo package -p dioxus-storybook-core
+
+# --- M0 archaeology, rarely needed ---
+cd spikes/s1-hotreload && dx serve --platform web   # note the cd, it is load-bearing
+cargo test -p s3-test                               # 15 tests, real Dioxus types
+./spikes/s2-registry/verify.sh                      # the registration matrix
+```
+
+---
+
+## Architecture decisions already made
+
+| | Decision | Why |
+|---|---|---|
+| Registry | **build-script codegen** | `linkme` and `inventory` both fail on wasm — see log |
+| Controls | **`#[derive(Controls)]`** on the Props struct | macro sees names, types and doc comments statically, and the applier it emits is compiler-checked |
+| Args → props | an **applier**, not a deserializer | props hold `EventHandler`/`Element`, which aren't serializable |
+| Isolation | **`Channel` trait from commit 1**, in-process now, iframe at M3 | lets the transport change without rewriting addons |
+| Platform | **web-first** | the static build is both the shareable artifact and the screenshot-test substrate |
+| Story bodies | **fn pointers invoked in-scope** | `rsx!`/`EventHandler::new` need an active Dioxus scope |
+| Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |
+| Namespace (D5) | **`dioxus-storybook-*`**, MIT, © DW3Labs | discoverability beat `dx-story`'s trademark distance |
+| Story ↔ component | **`macro_rules!` bridge from `story_meta!`** | `#[story]` knows the props type, `story_meta!` knows the component; neither can name the other's half |
+
+## Gotchas that will bite you
+
+- **`dx serve --hot-patch` does not build** on wasm (`exceptions proposal not
+  enabled`). Use plain `dx serve --platform web`. `panic = "abort"` does *not*
+  fix it — already tried.
+- **`dx` and the `dioxus` crate versions must match exactly** or dx refuses to run.
+- **`spikes/s1-hotreload` is excluded from the workspace.** `cd` into it;
+  `--package s1-hotreload` from the root will not find it.
+- **Workspace is edition 2024** → `#[unsafe(no_mangle)]`, not `#[no_mangle]`.
+- **rsx! format strings interpolate idents only.** `{a * b}` fails to parse;
+  compute into a `let` first.
+- **Any file that invokes `rsx!` needs `dioxus::prelude::*` in scope** — it
+  expands to unqualified `dioxus_core::`/`dioxus_signals::` paths. This includes
+  stories files, where our bridge expands `rsx!` for you; that is why
+  `dioxus_storybook::prelude` re-exports the dioxus prelude.
+- **The scope rule is broader than rendering.** Anything that evaluates a
+  story's props needs an active scope, `StoryDef::base_args()` included.
+- **Writing a `Signal` inside an `Fn` callback:** copy it *inside* the body.
+  Capturing a `mut` copy makes the closure `FnMut`.
+- **Do not construct `StoryDef`/`Meta` with struct literals.** Fields are private
+  so that adding one stays non-breaking; use the `const` builders.
+- **Never emit a `macro_rules!` from one proc macro for another proc macro's
+  expansion to call with a value argument.** rustc accepts it; rust-analyzer
+  reports a false `E0425` at every call site (rust-analyzer#10644, open since
+  2021). Emit a plain `fn` instead. `rust-analyzer diagnostics .` must stay
+  clean — a green `cargo test` does not prove the authoring surface is usable.
+- **Never script an edit with macOS `sed -i ''`** when measuring hot reload — it
+  writes a sibling temp file that dx's watcher picks up instead of your file.
+- **LTO const-folds static registries into literals.** A registry test that only
+  counts entries can pass while proving nothing. Use `black_box` and read real
+  bytes out of linear memory.
+
+## Working style for this project
+
+- Spikes over speculation: when a design question has a testable answer, write
+  the throwaway binary and run it. Two of M0's three findings contradicted
+  confident prior assumptions.
+- Verify by execution, not compilation. "It builds" is not "it works" — the
+  `inventory` spike compiled cleanly and was still wrong.
+- When a measurement looks too good, suspect the measurement first.

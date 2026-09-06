@@ -1,0 +1,14 @@
+[package]
+name = "s2-inv-wasmapp-unref"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+[lib]
+crate-type = ["cdylib"]
+[dependencies]
+s2-inv-core = { path = "../inv-core" }
+# Depended on, but NEVER referenced by name anywhere below. This is the
+# worst case: a component crate whose stories self-register and which the
+# storybook binary never calls into.
+s2-inv-components = { path = "../inv-components" }
+inventory = "0.3"

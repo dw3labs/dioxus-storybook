@@ -1,0 +1,5 @@
+[application]
+name = "s1-hotreload"
+
+[web.app]
+title = "S1 · Dioxus Storybook hot-reload spike"

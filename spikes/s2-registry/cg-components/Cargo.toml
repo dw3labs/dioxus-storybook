@@ -1,0 +1,8 @@
+[package]
+name = "s2-cg-components"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+build = "build.rs"
+[dependencies]
+s2-cg-core = { path = "../cg-core" }

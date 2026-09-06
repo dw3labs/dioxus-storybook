@@ -1,0 +1,10 @@
+[package]
+name = "s3-test"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+s3-core  = { path = "../core" }
+s3-macro = { path = "../macro" }
+dioxus = "0.7"

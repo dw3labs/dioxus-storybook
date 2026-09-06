@@ -1,0 +1,8 @@
+[package]
+name = "s2-inv-components"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+[dependencies]
+s2-inv-core = { path = "../inv-core" }
+inventory = "0.3"

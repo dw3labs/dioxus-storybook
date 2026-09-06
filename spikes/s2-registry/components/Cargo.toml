@@ -1,0 +1,9 @@
+[package]
+name = "s2-components"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+s2-core = { path = "../core" }
+linkme.workspace = true
