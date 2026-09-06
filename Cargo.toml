@@ -31,6 +31,8 @@ edition = "2024"
 rust-version = "1.97"
 license = "MIT"
 authors = ["DW3Labs"]
+repository = "https://github.com/dw3labs/dioxus-storybook"
+homepage = "https://github.com/dw3labs/dioxus-storybook"
 # `version` and `publish` are the SPIKE defaults. The published crates under
 # crates/ override both explicitly; everything else they inherit from here.
 version = "0.0.0"
