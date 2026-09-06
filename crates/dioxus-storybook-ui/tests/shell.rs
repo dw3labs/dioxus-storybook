@@ -7,7 +7,7 @@
 
 use dioxus::prelude::*;
 use dioxus_ssr::render;
-use dioxus_storybook_core::{ArgMap, Registry, StoryDef};
+use dioxus_storybook_core::{Registry, StoryDef};
 use dioxus_storybook_ui::{Storybook, StorybookProps};
 
 static PRIMARY: StoryDef = StoryDef::new("Forms/Button", "Primary", |_| {

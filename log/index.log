@@ -8,7 +8,8 @@ PROJECT   A native Storybook for Dioxus: a component workbench where each
           driven by auto-generated controls, and later doubling as tests + docs.
 STATUS    M0 (feasibility spikes) COMPLETE — verdict GO.
           M1 (walking skeleton) COMPLETE — browse + render + URL state.
-          M2 (controls & actions) NOT STARTED.
+          M2 (controls & actions) COMPLETE — the workbench is editable.
+          M3 (isolation, globals, environment) NOT STARTED.
 SCOPE     Publishable open-source crate (D1b): M0..M6, semver + docs discipline.
 NAME      dioxus-storybook · MIT · (c) DW3Labs
 TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
@@ -18,39 +19,45 @@ TARGET    Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first
  HOT — what happens next
 --------------------------------------------------------------------------------
 
-NOTHING IS BLOCKED. D1 and D5 were answered in session 0003:
-  D1 -> (b) publishable open-source crate. M0..M6, semver discipline.
-  D5 -> `dioxus-storybook-*`. MIT, (c) DW3Labs.
+NOTHING IS BLOCKED. M2 shipped in session 0004: controls panel, actions panel,
+use_args write-back, Vec<T> args, and a scope per story.
 
-NEXT UP (M2 — controls & actions, ~3-4 weeks). The differentiating milestone.
-  [ ] Controls panel — LARGELY A PORT. spikes/s1-hotreload/src/main.rs already
-      has a working widget for every Control variant (text, number, range,
-      toggle, select, radio, color). Lift it into dioxus-storybook-ui.
-  [ ] Reset-to-default button -> emit Event::ResetArgs (the variant exists).
-  [ ] Args panel edits must flow manager -> preview over the Channel, NOT via a
-      shared signal. The channel is the whole point; do not shortcut it.
-  [ ] Actions panel: wire EventHandler props to Event::ActionLogged.
-      Control::Action is already inferred by the derive for those fields.
-  [ ] use_args write-back, so a story can drive its own controlled inputs.
-  [ ] ArgValue for Vec<T> — add a variant (the enum is #[non_exhaustive], so
-      this is not a breaking change).
+NEXT UP (M3 — isolation, globals & environment, ~2-3 weeks).
+  [ ] Split manager and preview into TWO wasm bundles + a postMessage Channel
+      impl. M2 was written for this: no addon reads a preview signal, the
+      manager never evaluates a story, and every Event carries owned data.
+      FIRST QUESTION: does the manager bundle still link the registry? If yes,
+      ArgType can stay `&'static` on both sides and nothing needs a DTO. If no,
+      Control::Select's `&'static [&'static str]` needs an owned mirror.
+  [ ] Decorators at 3 levels (global -> component -> story, outermost first).
+  [ ] Parameters with merge semantics. The types exist; the merge does not.
+  [ ] Globals + toolbar.
+  [ ] viewport / backgrounds / measure / outline addons.
+  [ ] Error boundary reporting panics to the manager.
+  [ ] MEASURE FIRST: Callback::new runs once per action prop PER RENDER inside
+      wire_actions, and story bodies already did the same in M1. Entries free
+      only when StoryHost remounts. Bounded, but drag a slider and find out.
+      See LOG-0004 "Known issue for M3".
 
 READY TO RUN:
-  cargo test --workspace                       43 tests + 8 doctests, all green
+  cargo test --workspace                       67 tests + 10 doctests, all green
   rust-analyzer diagnostics .                  MUST stay clean — see standing facts
-  cd examples/button-gallery && dx serve --platform web
+  cd examples/button-gallery && dx serve --platform web    14 stories
   cargo package -p dioxus-storybook-core       verifies the publish metadata
 
 SMALL FOLLOW-UPS (unblocked, do any time):
-  [x] DONE — git + manifest URLs. Remote is dw3labs/dioxus-storybook (private).
-      repository/homepage live in [workspace.package]; all five published
-      crates inherit them. cargo package no longer warns. `documentation` is
-      deliberately unset: docs.rs is linked automatically from crates.io.
   [ ] File upstream dx issue: `dx serve --hot-patch` fails on wasm with
       "exceptions proposal not enabled". Repro + analysis in LOG-0002.
   [ ] Publish order when the time comes: core -> macro -> build -> ui -> facade.
+  [ ] A real list widget for Vec<T>. Today it is a comma-separated text box.
+      Control is #[non_exhaustive], so adding one is not breaking.
+  [ ] AT M5, re-check CSP. dioxus-web links `new Function` (document.rs:220,
+      WebEvaluator::create = document::eval) into every binary, so a strict CSP
+      without unsafe-eval would break it. Nothing here calls document::eval, so
+      a static build is fine today. Measured in session 0004: our app serves no
+      CSP header and no CSP meta tag.
 
-STILL OPEN (neither blocks M2):
+STILL OPEN (neither blocks M3):
   D3  Ship M5 (static build/publish) early for adoption, or M6 (testing) early
       for rigour? Cannot do both first.
   D4  Is `dx serve --platform desktop` in scope at all, or web-only forever?
@@ -59,12 +66,30 @@ DO NOT DO:
   - Do not reach for `linkme` or `inventory` for the story registry. Both were
     tested and both fail on wasm. See LOG-0002 / S2 before revisiting.
   - Do not pass `--hot-patch` to dx serve. It does not build.
+  - Do not let the MANAGER call StoryDef::base_args(). It needs a live scope and
+    at M3 the story fns are in the other bundle. The preview publishes them as
+    Event::StoryPrepared. See LOG-0004 / F1.
+  - Do not render a story body inline in the preview again. Stories get their
+    own scope via StoryHost, remounted per story. See LOG-0004 / F2.
+  - Do not "simplify" the one-element `for def in [def]` loop around StoryHost
+    into a plain child. Dioxus only honours `key` when diffing a LIST; a lone
+    keyed child is re-rendered in place and the hook bug comes back.
   - Do not add a controls panel that mutates the preview's args signal directly.
     Route it through the Channel or M3's iframe split will require a rewrite.
   - Do not emit a `macro_rules!` from one proc macro for another to call with a
     value argument. It compiles and it breaks rust-analyzer. See standing facts.
   - Do not construct StoryDef/Meta with struct literals. Fields are private on
     purpose; use the const builders so adding a field stays non-breaking.
+  - Do not put ArgType on the wire. It holds &'static str; the manager reads the
+    const table directly instead.
+  - Do not create a signal in a CHILD scope that an ANCESTOR's code writes. The
+    channel listener runs in the emitter's scope, so preview signals written by
+    the manager must be Signal::new_in_scope(.., ScopeId::ROOT). See LOG-0004/F8.
+  - Do not trust a green suite for UI work. 92 tests passed while two real
+    defects sat in the running app. Open the browser and click it.
+  - Do not emit `<label for=..>` unconditionally in the controls panel. Action
+    and skipped rows render prose with no control to point at, and radio rows
+    key their inputs per option. Use `label_target`. See LOG-0004/F9.
 
 
 --------------------------------------------------------------------------------
@@ -85,6 +110,13 @@ DO NOT DO:
                                                Macro bridge redesigned
                                                after an r-a false error.
 
+0004  2026-09-06  M2 controls & actions        Controls + actions       log/0004-m2-controls-and-actions.md
+                                               panels, use_args
+                                               write-back, Vec<T> args.
+                                               Found + fixed a latent
+                                               hook-order bug: stories
+                                               now get their own scope.
+
 
 --------------------------------------------------------------------------------
  STANDING FACTS  (things that cost time to learn — do not re-derive)
@@ -101,6 +133,20 @@ BUILD / SERVE
     into it; `--package s1-hotreload` from the root will not find it.
 
 RUST / DIOXUS GOTCHAS
+  * `key` is ONLY consulted when diffing a LIST (`diff_keyed_children`). A lone
+    keyed child in a fixed template position goes through `diff_node`, which
+    never looks at it — so a changing key there does NOT remount. To force a
+    remount, render a keyed list of exactly one. This is why the preview wraps
+    `StoryHost` in `for def in [def]`.
+  * Story bodies must NOT be rendered inline in a shared scope. Their hooks land
+    in that scope's hook list, and two stories with different hook counts then
+    corrupt each other on a switch. Each story gets its own remounted scope.
+  * `Callback`/`EventHandler` `PartialEq` is pointer identity, and `Callback::new`
+    allocates in the CURRENT SCOPE'S owner — freed only when that scope drops.
+    Building one per render is legal but accumulates. See LOG-0004.
+  * `try_consume_context` panics with no RUNTIME (not just no context): it
+    unwraps `Runtime::current()`. Use `Runtime::try_current()` first if the call
+    site has to be total. `has_context` has the same trap.
   * rsx! format strings interpolate IDENTS ONLY. `{a * b}` and `{if x {..}}`
     fail to parse. Compute into a `let` first.
   * `rsx!` and `EventHandler::new` need an active Dioxus SCOPE, not just a
@@ -122,6 +168,17 @@ RUST / DIOXUS GOTCHAS
     must be `pub` regardless of the story fn's own visibility.
 
 PROC MACROS vs RUST-ANALYZER  (cost a session to find; cargo test cannot catch it)
+  * EDITING A PROC MACRO'S OUTPUT REQUIRES RESTARTING RUST-ANALYZER. The editor
+    keeps the OLD proc-macro dylib while type-checking against the NEW trait, so
+    adding a required method to a derived trait shows a false
+    `E0046: not all trait items implemented` at EVERY derive site until the
+    server reloads. Hit in session 0004 after `Controllable` gained
+    `wire_actions`. Confirm with `cargo check --workspace --all-targets` and
+    headless `rust-analyzer diagnostics .` — if both are clean, it is staleness,
+    not your code. Fix: "rust-analyzer: Restart Server" / reload the window.
+  * Adding a REQUIRED method to a public trait breaks hand-written impls. That is
+    a deliberate accepted cost for `Controllable`, which is derive-only by
+    documentation and has not been published yet. Revisit before 0.1.0 ships.
   * NEVER have one proc macro emit a `macro_rules!` that another proc macro's
     expansion then calls with a VALUE argument. rustc accepts it; rust-analyzer
     reports a false `E0425: no such value in this scope` at every call site.

@@ -130,10 +130,29 @@ fn infer(ty: &Type) -> TokenStream {
         | "usize" => quote!(#core::Control::Number { min: None, max: None, step: None }),
         "EventHandler" | "Callback" => quote!(#core::Control::Action),
         "Element" | "VNode" => quote!(#core::Control::None),
+        // A list is edited as comma-separated text; `FromArg for Vec<T>` parses
+        // that form back. A dedicated list widget can arrive later without
+        // changing anything here — `Control` is `#[non_exhaustive]`.
+        "Vec" => quote!(#core::Control::Text),
         _ => quote!(#core::Control::Select {
             options: <#base as #core::ControlEnum>::VARIANTS
         }),
     }
+}
+
+/// Is this field an event handler, and therefore instrumentable by
+/// `wire_actions`?
+///
+/// Deliberately syntactic, matching [`infer`]: a field is wrapped only when it
+/// is spelled `EventHandler<..>` or `Callback<..>`. The wrapper is built with
+/// `<FieldType>::new(..)`, so `Callback<A, R>` works as well as
+/// `EventHandler<A>` — the closure simply returns whatever the inner handler
+/// returns.
+fn is_handler(ty: &Type) -> bool {
+    matches!(
+        head(ty).unwrap_or_default().as_str(),
+        "EventHandler" | "Callback"
+    )
 }
 
 /// Does this field get a live control, and therefore participate in `apply`?
@@ -167,6 +186,7 @@ pub fn derive_controls(ast: DeriveInput) -> TokenStream {
     let mut rows = Vec::new();
     let mut applies = Vec::new();
     let mut seeds = Vec::new();
+    let mut wires = Vec::new();
 
     for field in &named.named {
         let ident = field.ident.as_ref().expect("named fields");
@@ -216,6 +236,57 @@ pub fn derive_controls(ast: DeriveInput) -> TokenStream {
         } else {
             applies.push(quote! { #ident: self.#ident.clone() });
         }
+
+        // Handlers are the one field kind `apply` cannot touch, so they get
+        // their own pass. `<#ty>::new` rather than `EventHandler::new` so the
+        // wrapper keeps the field's own argument and return types.
+        // Autoref specialisation: prints the payload when it is `Debug` and
+        // degrades to a placeholder when it is not, without putting a bound on
+        // the user's type.
+        let log = quote! {
+            #[allow(unused_imports)]
+            use #core::actions::describe::DescribeFallback as _;
+            __dxsb_sink.log(
+                #fname,
+                #core::actions::describe::Probe(&__dxsb_event).dxsb_describe(),
+            );
+        };
+        let skipped = matches!(ov, Some(Override::Skip));
+        let handler_ty = (!skipped)
+            .then(|| {
+                if is_handler(ty) {
+                    Some((ty, false))
+                } else {
+                    option_inner(ty).filter(|t| is_handler(t)).map(|t| (t, true))
+                }
+            })
+            .flatten();
+
+        match handler_ty {
+            // `<#inner>::new` rather than `EventHandler::new` so the wrapper
+            // keeps the field's own argument and return types — that is what
+            // makes this work for `Callback<A, R>` as well as `EventHandler<A>`.
+            Some((inner, false)) => wires.push(quote! {
+                #ident: {
+                    let __dxsb_inner = self.#ident;
+                    let __dxsb_sink = ::core::clone::Clone::clone(sink);
+                    <#inner>::new(move |__dxsb_event| {
+                        #log
+                        __dxsb_inner.call(__dxsb_event)
+                    })
+                }
+            }),
+            Some((inner, true)) => wires.push(quote! {
+                #ident: self.#ident.map(|__dxsb_inner| {
+                    let __dxsb_sink = ::core::clone::Clone::clone(sink);
+                    <#inner>::new(move |__dxsb_event| {
+                        #log
+                        __dxsb_inner.call(__dxsb_event)
+                    })
+                })
+            }),
+            None => wires.push(quote! { #ident: self.#ident.clone() }),
+        }
     }
 
     quote! {
@@ -235,6 +306,15 @@ pub fn derive_controls(ast: DeriveInput) -> TokenStream {
                 let mut m = #core::ArgMap::new();
                 #(#seeds)*
                 m
+            }
+
+            fn wire_actions(&self, sink: &#core::ActionSink) -> Self {
+                // Cheap when the sink is disabled, but not free: building a
+                // handler needs a live scope either way, which is exactly why
+                // this is a separate pass invoked from the story body rather
+                // than something the registry could precompute.
+                let _ = sink;
+                Self { #(#wires),* }
             }
         }
     }

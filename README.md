@@ -6,10 +6,11 @@ Declare each of your component's states as a *story*, render it in isolation,
 and browse the lot in a workbench — with the selected story and its arguments
 carried in the URL, so a rebuild puts you back exactly where you were.
 
-> **Status: M1, the walking skeleton.** Stories are discovered, indexed,
-> browsable and rendered. `#[derive(Controls)]` already builds the props table
-> from your types and doc comments; the panel that *edits* those controls is M2.
-> **Not published to crates.io yet** — use a git dependency for now.
+> **Status: M2, controls and actions.** Stories are discovered, indexed,
+> browsable and rendered; every prop is editable live from a panel generated out
+> of your props type; and the component's own `EventHandler`s report their calls
+> to an actions log. **Not published to crates.io yet** — use a git dependency
+> for now.
 
 ## What it looks like
 
@@ -193,8 +194,8 @@ authoring surface is usable in an editor.
 |---|---|---|
 | M0 | Feasibility spikes | ✅ complete |
 | M1 | Walking skeleton — browse, render, URL state | ✅ complete |
-| M2 | Controls panel, actions, `use_args` write-back | next |
-| M3 | Manager/preview iframe split, decorators, globals, viewport | |
+| M2 | Controls panel, actions, `use_args` write-back | ✅ complete |
+| M3 | Manager/preview iframe split, decorators, globals, viewport | next |
 | M4 | Autodocs — props tables, source snippets | |
 | M5 | Static build and deploy | |
 | M6 | Play functions, interactions panel, a11y, visual regression | |

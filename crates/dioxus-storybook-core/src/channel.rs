@@ -32,11 +32,41 @@ pub enum Event {
         id: String,
     },
     /// The manager changed the args for the current story.
+    ///
+    /// Authoritative and complete: the receiver replaces its arg set with this
+    /// one rather than merging. Compare [`Event::RequestArgsUpdate`], which
+    /// travels the other way and *is* a delta.
     UpdateArgs {
         /// The story the args belong to.
         id: String,
         /// The full arg set, not a delta.
         args: ArgMap,
+    },
+    /// The preview asks the manager to merge some args into the current set.
+    ///
+    /// Sent when a story writes its own args back through
+    /// [`ArgsHandle`](crate::ArgsHandle) — a controlled input, say. The manager
+    /// merges and re-broadcasts as [`Event::UpdateArgs`], which is what stops
+    /// the two sides from keeping divergent copies.
+    RequestArgsUpdate {
+        /// The story the args belong to.
+        id: String,
+        /// Only the args that changed.
+        args: ArgMap,
+    },
+    /// The preview evaluated a story's typed props and is publishing the
+    /// defaults they imply.
+    ///
+    /// The controls panel needs a story's default values to show what a control
+    /// is currently sitting at, but the manager must not compute them itself:
+    /// evaluating props requires a Dioxus scope and, from M3, the story
+    /// functions live in the other bundle entirely. So the preview computes
+    /// them once per story and sends them across.
+    StoryPrepared {
+        /// The story that was prepared.
+        id: String,
+        /// The story's own arg values, before any URL or panel overlay.
+        initial_args: ArgMap,
     },
     /// The manager asked to drop overrides and fall back to story defaults.
     ResetArgs {

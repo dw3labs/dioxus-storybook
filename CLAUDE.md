@@ -5,7 +5,8 @@ workbench where each component's states are declared as *stories*, rendered in
 isolation, driven by controls auto-generated from the props type, and later
 doubling as tests and documentation.
 
-**Status:** M0 (spikes) and M1 (walking skeleton) complete. M2 not started.
+**Status:** M0 (spikes), M1 (walking skeleton) and M2 (controls & actions)
+complete. M3 not started.
 **Scope:** a publishable open-source crate — semver + docs discipline apply.
 **Name:** `dioxus-storybook` · MIT · © DW3Labs.
 **Target:** Dioxus 0.7.10 · rustc 1.97.1 · dx 0.7.10 · web-first.
@@ -51,6 +52,7 @@ log/
   0001-research-and-plan.md
   0002-m0-spikes.md
   0003-m1-walking-skeleton.md
+  0004-m2-controls-and-actions.md
 docs/
   PLAN.md                  the working plan: features, problems, milestones
   M0-FINDINGS.md           full spike write-up
@@ -76,7 +78,7 @@ Cargo.toml                 workspace (edition 2024)
 # Run the storybook. This is the main loop.
 cd examples/button-gallery && dx serve --platform web
 
-# The whole suite: 43 tests + 8 doctests. Everything must stay green.
+# The whole suite: 67 tests + 10 doctests. Everything must stay green.
 cargo test --workspace
 
 # Check the publish metadata still holds
@@ -103,6 +105,10 @@ cargo test -p s3-test                               # 15 tests, real Dioxus type
 | Ambition (D1) | **publishable crate**, M0..M6 | drives semver discipline: private fields + `const` builders, `#[non_exhaustive]`, `#![deny(missing_docs)]` |
 | Namespace (D5) | **`dioxus-storybook-*`**, MIT, © DW3Labs | discoverability beat `dx-story`'s trademark distance |
 | Story ↔ component | **`macro_rules!` bridge from `story_meta!`** | `#[story]` knows the props type, `story_meta!` knows the component; neither can name the other's half |
+| Actions | **substitution in `wire_actions`**, emitted by the same derive | an `EventHandler` is observed, not edited, so `apply` cannot do it |
+| Action payloads | **autoref specialisation on `Debug`** | prints what it can without putting a bound on the user's prop types |
+| Default arg values | **the preview computes them, the manager receives them** | evaluating props needs a scope, and at M3 the story fns are in the other bundle |
+| Story scope | **one remounted `StoryHost` per story** | a story's hooks must not share the preview's hook list |
 
 ## Gotchas that will bite you
 
@@ -125,6 +131,16 @@ cargo test -p s3-test                               # 15 tests, real Dioxus type
   Capturing a `mut` copy makes the closure `FnMut`.
 - **Do not construct `StoryDef`/`Meta` with struct literals.** Fields are private
   so that adding one stays non-breaking; use the `const` builders.
+- **`key` only works inside a list.** Dioxus consults it in `diff_keyed_children`
+  only; a lone keyed child is diffed in place and never remounts. The preview
+  wraps `StoryHost` in `for def in [def]` for exactly this reason — do not
+  "simplify" it away.
+- **Editing a proc macro's output needs a rust-analyzer restart.** The editor
+  keeps the old dylib while checking against the new trait, so you get a false
+  `E0046` at every derive site. `cargo check --workspace --all-targets` clean +
+  `rust-analyzer diagnostics .` clean means it is staleness, not your code.
+- **`try_consume_context` panics with no runtime,** not just with no context.
+  Guard with `Runtime::try_current()` anywhere that has to be total.
 - **Never emit a `macro_rules!` from one proc macro for another proc macro's
   expansion to call with a value argument.** rustc accepts it; rust-analyzer
   reports a false `E0425` at every call site (rust-analyzer#10644, open since

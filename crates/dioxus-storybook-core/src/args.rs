@@ -28,8 +28,74 @@ pub enum ArgValue {
     Bool(bool),
     /// An enum variant, selected by name. See [`ControlEnum`].
     Variant(String),
+    /// An ordered list, for `Vec<T>` fields.
+    ///
+    /// Homogeneous in practice but not by construction: like every other
+    /// variant, typing is restored on the way out by [`FromArg`], which drops
+    /// items it cannot convert rather than failing the whole list.
+    List(Vec<ArgValue>),
     /// An explicitly absent value; converts to `None` for `Option<T>` fields.
     Null,
+}
+
+impl ArgValue {
+    /// Render this value the way a text control should show it.
+    ///
+    /// Lists join with `", "`, which is exactly the form
+    /// [`FromArg for Vec<T>`](FromArg) parses back, so a text widget round-trips
+    /// a list without needing a list widget.
+    ///
+    /// ```
+    /// # use dioxus_storybook_core::ArgValue;
+    /// let list = ArgValue::List(vec![ArgValue::Text("a".into()), ArgValue::Num(2.0)]);
+    /// assert_eq!(list.as_text(), "a, 2");
+    /// assert_eq!(ArgValue::Bool(true).as_text(), "true");
+    /// assert_eq!(ArgValue::Null.as_text(), "");
+    /// ```
+    pub fn as_text(&self) -> String {
+        match self {
+            ArgValue::Text(s) | ArgValue::Variant(s) => s.clone(),
+            ArgValue::Num(n) => format_num(*n),
+            ArgValue::Bool(b) => b.to_string(),
+            ArgValue::List(items) => items
+                .iter()
+                .map(ArgValue::as_text)
+                .collect::<Vec<_>>()
+                .join(", "),
+            ArgValue::Null => String::new(),
+        }
+    }
+
+    /// Read this value as a number, for the number and range widgets.
+    pub fn as_num(&self) -> Option<f64> {
+        match self {
+            ArgValue::Num(n) => Some(*n),
+            ArgValue::Text(s) => s.parse().ok(),
+            ArgValue::Bool(b) => Some(f64::from(u8::from(*b))),
+            _ => None,
+        }
+    }
+
+    /// Read this value as a boolean, for the toggle widget.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            ArgValue::Bool(b) => Some(*b),
+            ArgValue::Text(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+}
+
+/// Format a float without a trailing `.0`, so `1.0` shows as `1`.
+///
+/// Shared with the URL codec so a value looks the same in a control as it does
+/// in the address bar.
+pub(crate) fn format_num(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 /// A bag of dynamic argument values, keyed by prop name.
@@ -144,10 +210,8 @@ num_impl!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64);
 impl FromArg for String {
     fn from_arg(value: &ArgValue) -> Option<Self> {
         match value {
-            ArgValue::Text(s) | ArgValue::Variant(s) => Some(s.clone()),
-            ArgValue::Num(n) => Some(n.to_string()),
-            ArgValue::Bool(b) => Some(b.to_string()),
             ArgValue::Null => None,
+            other => Some(other.as_text()),
         }
     }
 }
@@ -189,6 +253,41 @@ impl<T: ToArg> ToArg for Option<T> {
     }
 }
 
+/// A `Vec<T>` accepts either a real [`ArgValue::List`] or a comma-separated
+/// [`ArgValue::Text`], which is what the text widget and a hand-written URL
+/// produce. Items that will not convert are dropped, so one bad element does
+/// not discard the rest.
+///
+/// ```
+/// # use dioxus_storybook_core::{ArgValue, FromArg};
+/// let from_text = Vec::<u32>::from_arg(&ArgValue::Text("1, 2, 3".into()));
+/// assert_eq!(from_text, Some(vec![1, 2, 3]));
+///
+/// let mixed = ArgValue::List(vec![ArgValue::Num(4.0), ArgValue::Bool(true)]);
+/// assert_eq!(Vec::<u32>::from_arg(&mixed), Some(vec![4]));
+/// ```
+impl<T: FromArg> FromArg for Vec<T> {
+    fn from_arg(value: &ArgValue) -> Option<Self> {
+        match value {
+            ArgValue::List(items) => Some(items.iter().filter_map(T::from_arg).collect()),
+            ArgValue::Null => Some(Vec::new()),
+            ArgValue::Text(s) if s.trim().is_empty() => Some(Vec::new()),
+            ArgValue::Text(s) => Some(
+                s.split(',')
+                    .map(|part| ArgValue::Text(part.trim().to_string()))
+                    .filter_map(|v| T::from_arg(&v))
+                    .collect(),
+            ),
+            other => T::from_arg(other).map(|v| vec![v]),
+        }
+    }
+}
+impl<T: ToArg> ToArg for Vec<T> {
+    fn to_arg(&self) -> ArgValue {
+        ArgValue::List(self.iter().map(ToArg::to_arg).collect())
+    }
+}
+
 /// Implemented by `#[derive(ControlEnum)]` on a unit-only enum; supplies the
 /// variant names that become the options of a select or radio control.
 pub trait ControlEnum: Sized {
@@ -215,4 +314,16 @@ pub trait Controllable: Sized {
     fn apply(&self, args: &ArgMap) -> Self;
     /// Seed a dynamic arg map from this typed value.
     fn to_args(&self) -> ArgMap;
+    /// Replace every [`Control::Action`] field with a handler that reports the
+    /// call to `sink` and then calls the story's own handler.
+    ///
+    /// This is the half of the args story that [`apply`](Controllable::apply)
+    /// cannot do: an `EventHandler` is not a value the panel edits, it is a
+    /// value the panel *observes*. Every other field is carried through
+    /// unchanged.
+    ///
+    /// Must be called from inside a Dioxus scope — it builds `EventHandler`s.
+    ///
+    /// [`Control::Action`]: crate::Control::Action
+    fn wire_actions(&self, sink: &crate::ActionSink) -> Self;
 }

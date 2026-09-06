@@ -51,7 +51,6 @@ pub fn Button(props: ButtonProps) -> Element {
     let radius = 6.0 * props.scale;
     let opacity = if props.disabled { 0.5 } else { 1.0 };
     let cursor = if props.disabled { "not-allowed" } else { "pointer" };
-    let tooltip = props.tooltip.clone().unwrap_or_default();
     let style = format!(
         "background:{bg}; color:{fg}; border:1px solid {border}; \
          font:500 {font_px}px/1.2 ui-sans-serif,system-ui; \
@@ -59,12 +58,40 @@ pub fn Button(props: ButtonProps) -> Element {
          opacity:{opacity}; cursor:{cursor};"
     );
     rsx! {
-        button {
-            disabled: props.disabled,
-            title: "{tooltip}",
-            onclick: move |e| props.onclick.call(e),
-            style: "{style}",
-            "{props.label}"
+        style { {TOOLTIP_CSS} }
+        span { class: "bg-tipwrap",
+            button {
+                disabled: props.disabled,
+                onclick: move |e| props.onclick.call(e),
+                style: "{style}",
+                "{props.label}"
+            }
+            // Not the native `title` attribute, for two reasons that both show
+            // up the moment you drive this from the controls panel: browsers
+            // delay a native tooltip by a second or more, so editing the prop
+            // looks like it did nothing; and they suppress it entirely on a
+            // disabled control, so the `Disabled` story could never show one.
+            // Hovering the wrapper rather than the button is what makes the
+            // second case work.
+            if let Some(tip) = props.tooltip.clone() {
+                span { class: "bg-tip", role: "tooltip", "{tip}" }
+            }
         }
     }
 }
+
+/// Styles for the tooltip bubble.
+///
+/// Carried by the component rather than the manager: a story's component owns
+/// its own presentation, and from M3 the preview is a separate document that
+/// the manager's stylesheet deliberately cannot reach into.
+const TOOLTIP_CSS: &str = r#"
+.bg-tipwrap{position:relative;display:inline-block}
+.bg-tip{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);
+  background:#17191C;color:#fff;font:12px/1.35 ui-sans-serif,system-ui;white-space:nowrap;
+  padding:4px 8px;border-radius:5px;opacity:0;visibility:hidden;transition:opacity .09s;
+  pointer-events:none;z-index:10}
+.bg-tip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:4px solid transparent;border-top-color:#17191C}
+.bg-tipwrap:hover .bg-tip{opacity:1;visibility:visible}
+"#;

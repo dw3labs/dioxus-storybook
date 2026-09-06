@@ -68,10 +68,9 @@
 //!
 //! # Status
 //!
-//! M1 — the walking skeleton: browse and render stories, with the selected
-//! story and its args carried in the URL. Auto-generated *controls* are derived
-//! and exposed on [`StoryDef::arg_types`], but the panel that edits them lands
-//! in M2. See the project plan for the milestone map.
+//! M2 — controls and actions. Browse and render stories, edit every prop live
+//! from a panel generated out of the props type, watch the component call its
+//! own event handlers, and share the result as a URL.
 //!
 //! # Design notes worth knowing
 //!
@@ -80,6 +79,14 @@
 //! - **Args are overlaid, not deserialised.** Props hold `EventHandler` and
 //!   `Element`; serde cannot touch them, so `#[derive(Controls)]` emits a
 //!   compiler-checked *applier* instead.
+//! - **Actions are wired by substitution, not reflection.** The same derive
+//!   emits a pass that replaces each `EventHandler` prop with one that reports
+//!   its calls first. The payload prints when it implements `Debug` and
+//!   degrades to a placeholder when it does not, so nothing is required of
+//!   your types.
+//! - **The controls panel never touches the preview.** It edits the manager's
+//!   arg set, which goes out on the channel; a story writes back the same way,
+//!   with [`use_args`](prelude::use_args).
 //! - **The registry is generated at build time,** because `linkme` does not
 //!   compile for wasm and `inventory` silently drops stories at
 //!   `codegen-units > 1`.
@@ -105,8 +112,9 @@ pub mod prelude {
     pub use dioxus::prelude::*;
 
     pub use dioxus_storybook_core::{
-        ArgMap, ArgType, ArgValue, Control, ControlEnum as ControlEnumTrait, Controllable,
-        FromArg, Meta, ParamValue, Parameters, Registry, StoryDef, ToArg,
+        ActionSink, ArgMap, ArgType, ArgValue, ArgsHandle, Control,
+        ControlEnum as ControlEnumTrait, Controllable, FromArg, Meta, ParamValue, Parameters,
+        Registry, StoryDef, ToArg, use_args,
     };
     pub use dioxus_storybook_macro::{ControlEnum, Controls, story, story_meta};
     pub use dioxus_storybook_ui::Storybook;

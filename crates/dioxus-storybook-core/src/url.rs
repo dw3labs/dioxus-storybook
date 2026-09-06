@@ -13,14 +13,19 @@
 //! ```
 //!
 //! Values are percent-encoded, with three literals reserved: `!true`, `!false`
-//! and `!null`. Everything else decodes as a number if it parses as one and as
-//! text otherwise.
+//! and `!null`, and one prefix: `!,` opens a comma-separated list. Everything
+//! else decodes as a number if it parses as one and as text otherwise.
+//!
+//! An empty list and a list holding one empty string both encode as `!,` and
+//! both decode as the empty list. That is the only place the codec is lossy,
+//! and it is the cheaper end of the trade against a heavier syntax.
 //!
 //! The encoding is deliberately untyped. A field declared `String` whose value
 //! is `"42"` comes back as [`ArgValue::Num`], and that is fine: typing is
 //! restored by the generated applier, which knows the real field types and
 //! falls back to the story's default for anything unconvertible.
 
+use crate::args::format_num;
 use crate::{ArgMap, ArgValue};
 
 /// Everything the URL carries about the current view.
@@ -117,6 +122,18 @@ fn encode_value(value: &ArgValue) -> String {
         ArgValue::Null => "!null".to_string(),
         ArgValue::Num(n) => percent_encode(&format_num(*n)),
         ArgValue::Text(s) | ArgValue::Variant(s) => percent_encode(s),
+        // `!,` then comma-joined items. Safe because `percent_encode` escapes a
+        // comma inside an item to `%2C`, so the separator cannot collide with
+        // content. Nested lists are flattened; the panel has no widget for them
+        // and the URL is not the place to invent one.
+        ArgValue::List(items) => {
+            let body = items
+                .iter()
+                .map(encode_value)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{LIST_PREFIX}{body}")
+        }
     }
 }
 
@@ -127,6 +144,14 @@ fn decode_value(raw: &str) -> ArgValue {
         "!null" => return ArgValue::Null,
         _ => {}
     }
+    if let Some(body) = raw.strip_prefix(LIST_PREFIX) {
+        return ArgValue::List(
+            body.split(',')
+                .filter(|s| !s.is_empty())
+                .map(decode_value)
+                .collect(),
+        );
+    }
     let decoded = percent_decode(raw);
     match decoded.parse::<f64>() {
         Ok(n) if n.is_finite() => ArgValue::Num(n),
@@ -134,14 +159,8 @@ fn decode_value(raw: &str) -> ArgValue {
     }
 }
 
-/// Format a float without a trailing `.0`, so `1.0` round-trips as `1`.
-fn format_num(n: f64) -> String {
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
-}
+/// The marker that opens a list value. See [`encode_args`].
+const LIST_PREFIX: &str = "!,";
 
 /// Percent-encode everything outside the RFC 3986 unreserved set.
 pub fn percent_encode(input: &str) -> String {

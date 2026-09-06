@@ -319,9 +319,17 @@ types. S2 killed both automatic-registration options. Details in
 > `story_meta!` bridges to the component with a generated **function**, not a
 > `macro_rules!`, because the macro version broke rust-analyzer. See LOG-0003.
 
-### M2 · Controls & actions (~3–4 weeks) — *the differentiating milestone*
+### M2 · Controls & actions — ✅ **COMPLETE**
 `#[derive(Controls)]` + `ControlEnum` · `ArgValue` for primitives, enums, `Option<T>`, `Vec<T>` · widgets: text, number, range, bool, select, radio, color · Controls panel with reset-to-default · (args-in-URL moved to M1) · `EventHandler` auto-wiring → Actions panel · `use_args` write-back.
 > **Delivers:** the "wow" loop. This is where it stops being a gallery.
+>
+> **Shipped.** 67 tests + 10 doctests. Two findings changed the design: the
+> manager cannot compute a story's default args (it needs a scope, and at M3 the
+> story fns are in the other bundle), so the preview publishes them as
+> `StoryPrepared`; and story bodies needed a scope of their own, because their
+> hooks were landing in the preview's hook list. `Vec<T>` is edited as
+> comma-separated text — a real list widget is a later, non-breaking addition.
+> See LOG-0004.
 
 ### M3 · Isolation, globals & environment (~2–3 weeks)
 Split manager/preview into two wasm bundles + `postMessage` `Channel` impl (no addon changes) · decorators at 3 levels · parameters with merge semantics · globals + toolbar · viewport, backgrounds, measure, outline addons · error boundary reporting panics to the manager.

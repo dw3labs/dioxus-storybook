@@ -24,6 +24,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod actions;
 pub mod args;
 pub mod arg_type;
 pub mod channel;
@@ -31,6 +32,7 @@ pub mod registry;
 pub mod story;
 pub mod url;
 
+pub use actions::{ActionSink, ArgsHandle, use_args};
 pub use arg_type::{ArgType, Control};
 pub use args::{ArgMap, ArgValue, ControlEnum, Controllable, FromArg, ToArg};
 pub use channel::{Channel, Event, InProcessChannel, Listener, Subscription};

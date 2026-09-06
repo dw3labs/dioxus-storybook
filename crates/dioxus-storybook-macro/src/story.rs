@@ -272,8 +272,15 @@ pub fn story(args: StoryArgs, func: ItemFn) -> TokenStream {
     } else {
         // Props form: overlay the dynamic args onto the story's typed props,
         // then hand the result to the component through the bridge.
+        // Overlay first, instrument second. `apply` carries handler fields
+        // through untouched, so this order leaves exactly one wrapper on each
+        // handler; the reverse order would work too but reads backwards.
         let body = quote! {
             let __props = <#return_ty as #core::Controllable>::apply(&#call, args);
+            let __props = <#return_ty as #core::Controllable>::wire_actions(
+                &__props,
+                &#core::ActionSink::ambient(),
+            );
             #bridge(__props)
         };
         let extras = quote! {
