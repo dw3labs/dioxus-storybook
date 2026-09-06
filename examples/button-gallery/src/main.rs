@@ -19,12 +19,5 @@ mod stories {
 }
 
 fn main() {
-    dioxus::launch(App);
-}
-
-#[component]
-fn App() -> Element {
-    rsx! {
-        Storybook { registry: stories::registry() }
-    }
+    dioxus::launch(|| rsx! { Storybook { registry: stories::registry() } });
 }
